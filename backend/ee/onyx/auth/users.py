@@ -6,6 +6,7 @@ import requests
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Request
+from fastapi import Response
 from fastapi import status
 from jwt import decode as jwt_decode
 from jwt import InvalidTokenError
@@ -14,6 +15,7 @@ from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ee.onyx.configs.app_configs import ANONYMOUS_USER_COOKIE_NAME
 from ee.onyx.configs.app_configs import JWT_PUBLIC_KEY_URL
 from ee.onyx.configs.app_configs import SUPER_CLOUD_API_KEY
 from ee.onyx.configs.app_configs import SUPER_USERS
@@ -135,3 +137,7 @@ def generate_anonymous_user_jwt_token(tenant_id: str) -> str:
 
 def decode_anonymous_user_jwt_token(token: str) -> dict:
     return jwt.decode(token, USER_AUTH_SECRET, algorithms=["HS256"])
+
+
+def delete_anonymous_user_cookie(response: Response) -> None:
+    response.delete_cookie(ANONYMOUS_USER_COOKIE_NAME)
