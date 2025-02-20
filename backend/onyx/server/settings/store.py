@@ -16,12 +16,6 @@ def load_settings() -> Settings:
     try:
         stored_settings = kv_store.load(KV_SETTINGS_KEY)
 
-        # Temporary check to ensure backwards compatibility
-        if stored_settings.get("temperature_override_enabled") is None:
-            stored_settings["temperature_override_enabled"] = False
-        if stored_settings.get("auto_scroll") is None:
-            stored_settings["auto_scroll"] = False
-
         settings = (
             Settings.model_validate(stored_settings) if stored_settings else Settings()
         )
