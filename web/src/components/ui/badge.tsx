@@ -39,6 +39,9 @@ const badgeVariants = cva(
           "border-green-200 bg-emerald-50 text-green-600 dark:border-green-600 dark:bg-green-900 dark:text-green-50",
         default:
           "border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-50",
+        warning:
+          "border-orange-200 bg-orange-50 text-orange-600 dark:border-orange-700 dark:bg-orange-900 dark:text-orange-50",
+
         secondary:
           "border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-50",
         destructive:
