@@ -125,7 +125,7 @@ export function SearchSummary({
       <div className="desktop:hidden">
         {" "}
         {docs && docs.length === 0 ? (
-          <NoDocuments />
+          finished && <NoDocuments />
         ) : (
           <button
             className="cursor-pointer mr-2 flex items-center gap-0.5"

@@ -78,11 +78,7 @@ function SummaryRow({
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Badge
-                    className="py-1 text-sm"
-                    variant="warning"
-                    icon={FiAlertCircle}
-                  >
+                  <Badge className="py-1 text-sm" variant="warning">
                     {summary.not_ready} source
                     {summary.not_ready > 1 ? "s " : " "}
                     {summary.not_ready > 1 ? "have" : "has"} not finished

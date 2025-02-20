@@ -529,7 +529,7 @@ export const AIMessage = ({
                         </div>
                       </div>
                     ) : (
-                      <NoDocuments />
+                      toolCall?.tool_result && <NoDocuments />
                     )}
 
                     {content || files ? (
