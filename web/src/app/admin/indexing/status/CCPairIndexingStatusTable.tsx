@@ -295,26 +295,6 @@ border border-border dark:border-neutral-700
               >
                 <div className="flex items-center gap-x-1">Auto-Sync</div>
               </Badge>
-              {/* {!ccPairsIndexingStatus.perm_sync_completed && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <Badge variant="invalid" icon={FiAlertCircle}>
-                        In Progress
-                      </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>
-                        Permissions sync has not yet completed for this
-                        connector. Documents may not be visible to all
-                        authorized users until the sync finishes. This process
-                        typically takes between a few minutes to a few hours.
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                
-              )} */}
             </div>
           ) : (
             <Badge variant={isEditable ? "private" : "default"} icon={FiLock}>
