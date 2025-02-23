@@ -636,3 +636,7 @@ TEST_ENV = os.environ.get("TEST_ENV", "").lower() == "true"
 MOCK_LLM_RESPONSE = (
     os.environ.get("MOCK_LLM_RESPONSE") if os.environ.get("MOCK_LLM_RESPONSE") else None
 )
+
+# Image summarization and extraction configs
+IMAGE_SUMMARIZATION_ENABLED = True
+EMBEDDED_IMAGE_EXTRACTION_ENABLED = True
