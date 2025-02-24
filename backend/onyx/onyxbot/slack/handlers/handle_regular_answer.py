@@ -261,7 +261,11 @@ def handle_regular_answer(
 
             # For DM (ephemeral message), we need to create a thread via a normal message so the user can see
             # the ephemeral message. This also will give the user a notification which ephemeral message does not.
-            if receiver_ids:
+
+            # If the channel is ephemeral, we don't need to send a message to the user since they will already see the message
+            if receiver_ids and not slack_channel_config.channel_config.get(
+                "is_ephemeral"
+            ):
                 respond_in_thread(
                     client=client,
                     channel=channel,
@@ -388,7 +392,11 @@ def handle_regular_answer(
         # the ephemeral message. This also will give the user a notification which ephemeral message does not.
         # if there is no message_ts_to_respond_to, and we have made it this far, then this is a /onyx message
         # so we shouldn't send_team_member_message
-        if receiver_ids and message_ts_to_respond_to is not None:
+        if (
+            receiver_ids
+            and message_ts_to_respond_to is not None
+            and not slack_channel_config.channel_config.get("is_ephemeral")
+        ):
             send_team_member_message(
                 client=client,
                 channel=channel,

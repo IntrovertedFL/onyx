@@ -577,6 +577,11 @@ export function SlackChannelConfigFormFields({
                 label="Respond to Bot messages"
                 tooltip="If not set, OnyxBot will always ignore messages from Bots"
               />
+              <CheckFormField
+                name="is_ephemeral"
+                label="Respond to as ephemeral message"
+                tooltip="If set, OnyxBot will respond only to the user as an ephemeral message"
+              />
 
               <TextArrayField
                 name="respond_member_group_list"

@@ -222,6 +222,11 @@ def handle_message(
         if message_info.email:
             add_slack_user_if_not_exists(db_session, message_info.email)
 
+        # If the message is ephemeral, send it to the sender only
+        if slack_channel_config.channel_config.get("is_ephemeral"):
+            if sender_id:
+                send_to = [sender_id]
+
         # first check if we need to respond with a standard answer
         used_standard_answer = handle_standard_answers(
             message_info=message_info,
