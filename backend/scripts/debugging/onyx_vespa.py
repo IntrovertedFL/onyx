@@ -193,7 +193,7 @@ def get_vespa_info() -> Dict[str, Any]:
         return response.json()
 
 
-def get_index_name(tenant_id: str) -> str:
+def get_index_name(tenant_id: str | None) -> str:
     # Return the index name for a given tenant.
     with get_session_with_tenant(tenant_id=tenant_id) as db_session:
         search_settings = get_current_search_settings(db_session)
@@ -241,7 +241,7 @@ def print_documents(documents: List[Dict[str, Any]]) -> None:
 
 
 def get_documents_for_tenant_connector(
-    tenant_id: str, connector_id: int, n: int = 10
+    tenant_id: str | None, connector_id: int, n: int = 10
 ) -> None:
     # Get and print documents for a specific tenant and connector.
     index_name = get_index_name(tenant_id)
@@ -287,7 +287,7 @@ def search_for_document(
 
 
 def search_documents(
-    tenant_id: str, connector_id: int, query: str, n: int = 10
+    tenant_id: str | None, connector_id: int, query: str, n: int = 10
 ) -> None:
     # Search documents for a specific tenant and connector.
     index_name = get_index_name(tenant_id)
@@ -301,7 +301,7 @@ def search_documents(
 
 
 def update_document(
-    tenant_id: str, connector_id: int, doc_id: str, fields: Dict[str, Any]
+    tenant_id: str | None, connector_id: int, doc_id: str, fields: Dict[str, Any]
 ) -> None:
     # Update a specific document.
     index_name = get_index_name(tenant_id)
@@ -317,7 +317,7 @@ def update_document(
         print(f"Document {doc_id} updated successfully")
 
 
-def delete_document(tenant_id: str, connector_id: int, doc_id: str) -> None:
+def delete_document(tenant_id: str | None, connector_id: int, doc_id: str) -> None:
     # Delete a specific document.
     index_name = get_index_name(tenant_id)
     logger.info(
@@ -347,7 +347,7 @@ def list_documents(n: int = 10, tenant_id: Optional[str] = None) -> None:
 
 
 def get_document_and_chunk_counts(
-    tenant_id: str, cc_pair_id: int, filter_doc: DocumentFilter | None = None
+    tenant_id: str | None, cc_pair_id: int, filter_doc: DocumentFilter | None = None
 ) -> Dict[str, int]:
     # Return a dict mapping each document ID to its chunk count for a given connector.
     with get_session_with_tenant(tenant_id=tenant_id) as session:
@@ -387,7 +387,7 @@ def get_document_and_chunk_counts(
 
 
 def get_chunk_ids_for_connector(
-    tenant_id: str,
+    tenant_id: str | None,
     cc_pair_id: int,
     index_name: str,
     filter_doc: DocumentFilter | None = None,
@@ -417,7 +417,7 @@ def get_chunk_ids_for_connector(
 
 
 def get_document_acls(
-    tenant_id: str,
+    tenant_id: str | None,
     cc_pair_id: int,
     n: int | None = 10,
     filter_doc: DocumentFilter | None = None,
@@ -483,7 +483,7 @@ def get_current_chunk_count(
 
 
 def get_number_of_chunks_we_think_exist(
-    document_id: str, index_name: str, tenant_id: str
+    document_id: str, index_name: str, tenant_id: str | None
 ) -> int:
     current_chunk_count = get_current_chunk_count(document_id, index_name, tenant_id)
     print(f"Current chunk count: {current_chunk_count}")
