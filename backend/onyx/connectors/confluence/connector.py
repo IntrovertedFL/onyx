@@ -39,7 +39,8 @@ from onyx.llm.factory import get_default_llm_with_vision
 from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
-
+# Potential Improvements
+# 1. Segment into Sections for more accurate linking, can split by headers but make sure no text/ordering is lost
 _COMMENT_EXPANSION_FIELDS = ["body.storage.value"]
 _PAGE_EXPANSION_FIELDS = [
     "body.storage.value",
@@ -92,6 +93,9 @@ class ConfluenceConnector(LoadConnector, PollConnector, SlimConnector):
         cql_query: str | None = None,
         batch_size: int = INDEX_BATCH_SIZE,
         continue_on_failure: bool = CONTINUE_ON_CONNECTOR_FAILURE,
+        # if a page has one of the labels specified in this list, we will just
+        # skip it. This is generally used to avoid indexing extra sensitive
+        # pages.
         labels_to_skip: list[str] = CONFLUENCE_CONNECTOR_LABELS_TO_SKIP,
         timezone_offset: float = CONFLUENCE_TIMEZONE_OFFSET,
     ) -> None:
@@ -102,7 +106,12 @@ class ConfluenceConnector(LoadConnector, PollConnector, SlimConnector):
 
         # Remove trailing slash from wiki_base if present
         self.wiki_base = wiki_base.rstrip("/")
-
+        """
+        If nothing is provided, we default to fetching all pages
+        Only one or none of the following options should be specified so
+            the order shouldn't matter
+        However, we use elif to ensure that only of the following is enforced
+        """
         base_cql_page_query = "type=page"
         if cql_query:
             base_cql_page_query = cql_query

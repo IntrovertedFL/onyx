@@ -1,5 +1,4 @@
 import io
-from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone
 from io import BytesIO
@@ -7,6 +6,7 @@ from typing import Any
 from urllib.parse import quote
 
 import bs4
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from onyx.configs.app_configs import (
@@ -19,6 +19,7 @@ from onyx.connectors.confluence.onyx_confluence import (
 from onyx.db.engine import get_session_with_current_tenant
 from onyx.db.models import PGFileStore
 from onyx.db.pg_file_store import create_populate_lobj
+from onyx.db.pg_file_store import save_bytes_to_pgfilestore
 from onyx.db.pg_file_store import upsert_pgfilestore
 from onyx.file_processing.extract_file_text import extract_file_text
 from onyx.file_processing.html_utils import format_document_soup
@@ -196,8 +197,7 @@ def validate_attachment_filetype(media_type: str) -> bool:
     return True
 
 
-@dataclass
-class AttachmentProcessingResult:
+class AttachmentProcessingResult(BaseModel):
     """
     A container for results after processing a Confluence attachment.
     'text' might be textual extraction or image summarization.
@@ -224,30 +224,6 @@ def _download_attachment(
         )
         return None
     return resp.content
-
-
-def _save_attachment_to_pgfilestore(
-    db_session: Session,
-    raw_bytes: bytes,
-    media_type: str,
-    attachment_id: str,
-    display_name: str,
-) -> PGFileStore:
-    """
-    Saves raw bytes to PGFileStore and returns the resulting record.
-    """
-    file_name = f"confluence_attachment_{attachment_id}"
-    lobj_oid = create_populate_lobj(BytesIO(raw_bytes), db_session)
-    pgfilestore = upsert_pgfilestore(
-        file_name=file_name,
-        display_name=display_name,
-        file_origin=FileOrigin.OTHER,
-        file_type=media_type,
-        lobj_oid=lobj_oid,
-        db_session=db_session,
-        commit=True,
-    )
-    return pgfilestore
 
 
 def _extract_or_summarize_attachment(
@@ -286,11 +262,11 @@ def _process_image_attachment(
     """Process an image attachment by saving it and generating a summary."""
     try:
         with get_session_with_current_tenant() as db_session:
-            saved_record = _save_attachment_to_pgfilestore(
+            saved_record = save_bytes_to_pgfilestore(
                 db_session=db_session,
                 raw_bytes=raw_bytes,
                 media_type=media_type,
-                attachment_id=attachment["id"],
+                identifier=attachment["id"],
                 display_name=attachment["title"],
             )
         user_prompt = IMAGE_SUMMARIZATION_USER_PROMPT.format(
@@ -347,11 +323,11 @@ def _process_text_attachment(
     # Save the attachment
     try:
         with get_session_with_current_tenant() as db_session:
-            saved_record = _save_attachment_to_pgfilestore(
+            saved_record = save_bytes_to_pgfilestore(
                 db_session=db_session,
                 raw_bytes=raw_bytes,
                 media_type=media_type,
-                attachment_id=attachment["id"],
+                identifier=attachment["id"],
                 display_name=attachment["title"],
             )
     except Exception as e:
@@ -418,23 +394,6 @@ def build_confluence_document_id(
     return f"{base_url}{content_url}"
 
 
-def _extract_referenced_attachment_names(page_text: str) -> list[str]:
-    """Parse a Confluence html page to generate a list of current
-        attachments in use
-
-    Args:
-        text (str): The page content
-
-    Returns:
-        list[str]: List of filenames currently in use by the page text
-    """
-    referenced_attachment_filenames = []
-    soup = bs4.BeautifulSoup(page_text, "html.parser")
-    for attachment in soup.findAll("ri:attachment"):
-        referenced_attachment_filenames.append(attachment.attrs["ri:filename"])
-    return referenced_attachment_filenames
-
-
 def datetime_from_string(datetime_string: str) -> datetime:
     datetime_object = datetime.fromisoformat(datetime_string)
 
@@ -480,39 +439,3 @@ def _attachment_to_download_link(
 ) -> str:
     """Extracts the download link to images."""
     return confluence_client.url + attachment["_links"]["download"]
-
-
-def _summarize_image_attachment(
-    attachment: dict[str, Any],
-    page_context: str,
-    llm: LLM,
-    confluence_client: OnyxConfluence,
-) -> tuple[str, str]:
-    """Summarize an image attachment using the LLM and save to file store."""
-    try:
-        user_prompt = IMAGE_SUMMARIZATION_USER_PROMPT.format(
-            title=attachment["title"],
-            page_title=attachment["title"],
-            confluence_xml=page_context,
-        )
-        with get_session_with_current_tenant() as db_session:
-            file_record, file_data = attachment_to_file_record(
-                confluence_client=confluence_client,
-                attachment=attachment,
-                db_session=db_session,
-            )
-
-        return (
-            summarize_image_pipeline(
-                llm=llm,
-                image_data=file_data,
-                query=user_prompt,
-                system_prompt=IMAGE_SUMMARIZATION_SYSTEM_PROMPT,
-            ),
-            file_record.file_name,
-        )
-
-    except Exception as e:
-        raise ValueError(
-            f"Image summarization failed for {attachment['title']}: {e}"
-        ) from e
