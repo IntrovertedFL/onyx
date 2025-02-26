@@ -7,6 +7,7 @@ from typing import Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
+from sqlalchemy.orm import validates
 from typing_extensions import TypedDict  # noreorder
 from uuid import UUID
 
@@ -2269,6 +2270,10 @@ class UserTenantMapping(Base):
 
     email: Mapped[str] = mapped_column(String, nullable=False, primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String, nullable=False)
+
+    @validates("email")
+    def validate_email(self, key: str, value: str) -> str:
+        return value.lower() if value else value
 
 
 # This is a mapping from tenant IDs to anonymous user paths
