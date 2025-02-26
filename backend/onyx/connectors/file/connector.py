@@ -8,7 +8,7 @@ from typing import IO
 
 from sqlalchemy.orm import Session
 
-from onyx.configs.app_configs import DISABLE_INDEXING_TIME_IMAGE_ANALYSIS
+from onyx.configs.app_configs import ENABLE_INDEXING_TIME_IMAGE_ANALYSIS
 from onyx.configs.app_configs import INDEX_BATCH_SIZE
 from onyx.configs.constants import DocumentSource
 from onyx.configs.constants import FileOrigin
@@ -259,7 +259,7 @@ class LocalFileConnector(LoadConnector, VisionEnabledConnector):
         self.pdf_pass: str | None = None
         self.image_analysis_llm: LLM | None = None
 
-        if not DISABLE_INDEXING_TIME_IMAGE_ANALYSIS:
+        if ENABLE_INDEXING_TIME_IMAGE_ANALYSIS:
             self.image_analysis_llm = get_default_llm_with_vision()
             if self.image_analysis_llm is None:
                 logger.warning(

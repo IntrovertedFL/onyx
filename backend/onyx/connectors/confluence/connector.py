@@ -117,15 +117,6 @@ class ConfluenceConnector(
         # Initialize vision LLM using the mixin
         self.initialize_vision_llm()
 
-        # Remove the old image analysis LLM initialization
-        # self.image_analysis_llm = None
-        # if not DISABLE_INDEXING_TIME_IMAGE_ANALYSIS:
-        #     self.image_analysis_llm = get_default_llm_with_vision()
-        #     if self.image_analysis_llm is None:
-        #         logger.warning(
-        #             "No LLM with vision found; image summarization will be disabled"
-        #         )
-
         # Remove trailing slash from wiki_base if present
         self.wiki_base = wiki_base.rstrip("/")
         """
