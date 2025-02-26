@@ -84,7 +84,20 @@ def handle_regular_answer(
 
     message_ts_to_respond_to = message_info.msg_to_respond
     is_bot_msg = message_info.is_bot_msg
-    user = None
+
+    # If the channel mis configured to respond with an ephemeral message,
+    # then we should use the proper user from the email
+    # Otherwise - if not ephemeral - we MUST None as the user to restrict to public docs
+    # as other people in the channel can see the response.
+    if slack_channel_config.channel_config.get("is_ephemeral", False):
+        with get_session_with_tenant(tenant_id=tenant_id) as db_session:
+            if message_info.email:
+                user = get_user_by_email(message_info.email, db_session)
+            else:
+                user = None
+    else:
+        user = None
+
     if message_info.is_bot_dm:
         if message_info.email:
             with get_session_with_tenant(tenant_id=tenant_id) as db_session:
