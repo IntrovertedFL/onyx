@@ -237,6 +237,7 @@ def _extract_or_summarize_attachment(
     or if it's an image and an LLM is available, summarizes it. Returns a structured result.
     """
     media_type = attachment["metadata"]["mediaType"]
+
     raw_bytes = _download_attachment(confluence_client, attachment)
     if not raw_bytes:
         return AttachmentProcessingResult(

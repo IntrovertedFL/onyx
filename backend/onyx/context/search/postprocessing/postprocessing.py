@@ -49,7 +49,8 @@ def update_image_sections_with_query(
     a new 'content' string that directly addresses the user's query about that image.
     This implementation uses parallel processing for efficiency.
     """
-    #
+    logger = setup_logger()
+    logger.debug(f"Starting image section update with query: {query}")
 
     # Collect all chunks with images that need processing
     chunks_with_images = []
@@ -59,19 +60,29 @@ def update_image_sections_with_query(
                 chunks_with_images.append(chunk)
 
     if not chunks_with_images:
+        logger.debug("No images to process in the sections")
         return  # No images to process
+
+    logger.info(f"Found {len(chunks_with_images)} chunks with images to process")
 
     # Define the function to process a single image chunk
     def process_image_chunk(chunk: InferenceChunk) -> tuple[str, str]:
         try:
+            logger.debug(
+                f"Processing image chunk with ID: {chunk.unique_id}, image: {chunk.image_file_name}"
+            )
             with get_session_with_current_tenant() as db_session:
                 file_record = get_default_file_store(db_session).read_file(
                     cast(str, chunk.image_file_name), mode="b"
                 )
                 if not file_record:
+                    logger.error(f"Image file not found: {chunk.image_file_name}")
                     raise Exception("File not found")
                 file_content = file_record.read()
                 image_base64 = base64.b64encode(file_content).decode()
+                logger.debug(
+                    f"Successfully loaded image data for {chunk.image_file_name}"
+                )
 
             messages: list[BaseMessage] = [
                 SystemMessage(content=IMAGE_ANALYSIS_SYSTEM_PROMPT),
@@ -94,8 +105,12 @@ def update_image_sections_with_query(
                 ),
             ]
 
+            print(f"Calling LLM for image analysis on chunk {chunk.unique_id}")
             raw_response = llm.invoke(messages)
+
             answer_text = message_to_string(raw_response).strip()
+            print(f"Received LLM response for image {chunk.image_file_name}")
+            print(f"Answer text: {answer_text}")
             return (
                 chunk.unique_id,
                 answer_text if answer_text else "No relevant info found.",
@@ -113,20 +128,40 @@ def update_image_sections_with_query(
     ]
 
     # Run the image processing tasks in parallel
+    logger.info(
+        f"Starting parallel processing of {len(image_processing_tasks)} image tasks"
+    )
     image_processing_results = run_functions_in_parallel(image_processing_tasks)
+    logger.info(
+        f"Completed parallel processing with {len(image_processing_results)} results"
+    )
 
     # Create a mapping of chunk IDs to their processed content
     chunk_id_to_content = {}
-    for _, result in image_processing_results.items():
+    success_count = 0
+    for task_id, result in image_processing_results.items():
         if result:
             chunk_id, content = result
             chunk_id_to_content[chunk_id] = content
+            success_count += 1
+        else:
+            logger.error(f"Task {task_id} failed to return a valid result")
+
+    logger.info(
+        f"Successfully processed {success_count}/{len(image_processing_results)} images"
+    )
 
     # Update the chunks with the processed content
+    updated_count = 0
     for section in sections:
         for chunk in section.chunks:
             if chunk.unique_id in chunk_id_to_content:
                 chunk.content = chunk_id_to_content[chunk.unique_id]
+                updated_count += 1
+
+    logger.info(
+        f"Updated content for {updated_count} chunks with image analysis results"
+    )
 
 
 logger = setup_logger()
@@ -358,6 +393,7 @@ def search_postprocessing(
     llm: LLM,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
 ) -> Iterator[list[InferenceSection] | list[SectionRelevancePiece]]:
+    print("INSIDE THE POST PROCESSING")
     post_processing_tasks: list[FunctionCall] = []
 
     if not retrieved_sections:

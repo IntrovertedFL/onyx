@@ -227,7 +227,7 @@ def _process_file(
     title = metadata.get("title") or file_display_name
 
     # 1) If the file itself is an image, handle that scenario quickly
-    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff"}
+    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
     if extension in IMAGE_EXTENSIONS:
         # Summarize or produce empty doc
         image_data = file.read()

@@ -299,6 +299,7 @@ class ConfluenceConnector(LoadConnector, PollConnector, SlimConnector):
 
                 # Attempt to get textual content or image summarization:
                 try:
+                    logger.info(f"Processing attachment: {attachment['title']}")
                     response = convert_attachment_to_content(
                         confluence_client=self.confluence_client,
                         attachment=attachment,

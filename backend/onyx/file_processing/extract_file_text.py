@@ -57,13 +57,16 @@ VALID_FILE_EXTENSIONS = PLAIN_TEXT_FILE_EXTENSIONS + [
     ".eml",
     ".epub",
     ".html",
-    # Adding common image extensions so we can store them in the DB
     ".png",
     ".jpg",
     ".jpeg",
-    ".gif",
-    ".bmp",
-    ".tiff",
+    ".webp",
+]
+
+IMAGE_MEDIA_TYPES = [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
 ]
 
 
@@ -74,6 +77,10 @@ def is_text_file_extension(file_name: str) -> bool:
 def get_file_ext(file_path_or_name: str | Path) -> str:
     _, extension = os.path.splitext(file_path_or_name)
     return extension.lower()
+
+
+def is_valid_media_type(media_type: str) -> bool:
+    return media_type in IMAGE_MEDIA_TYPES
 
 
 def is_valid_file_ext(ext: str) -> bool:
