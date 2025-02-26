@@ -471,9 +471,7 @@ def get_document_acls(
             print("-" * 80)
 
 
-def get_current_chunk_count(
-    document_id: str, index_name: str, tenant_id: str
-) -> int | None:
+def get_current_chunk_count(document_id: str) -> int | None:
     with get_session_with_current_tenant() as session:
         return (
             session.query(Document.chunk_count)
@@ -485,7 +483,7 @@ def get_current_chunk_count(
 def get_number_of_chunks_we_think_exist(
     document_id: str, index_name: str, tenant_id: str | None
 ) -> int:
-    current_chunk_count = get_current_chunk_count(document_id, index_name, tenant_id)
+    current_chunk_count = get_current_chunk_count(document_id)
     print(f"Current chunk count: {current_chunk_count}")
 
     doc_info = VespaIndex.enrich_basic_chunk_info(

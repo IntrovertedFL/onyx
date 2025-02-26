@@ -673,9 +673,6 @@ def stream_chat_message_objects(
             document_pruning_config=document_pruning_config,
             structured_response_format=new_msg_req.structured_response_format,
         )
-        if selected_sections:
-            for section in selected_sections:
-                print(section.__dict__)
 
         tool_dict = construct_tools(
             persona=persona,
@@ -759,7 +756,7 @@ def stream_chat_message_objects(
         )
 
         # LLM prompt building, response capturing, etc.
-        print(search_request)
+
         answer = Answer(
             prompt_builder=prompt_builder,
             is_connected=is_connected,
