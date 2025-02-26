@@ -50,6 +50,7 @@ from onyx.onyxbot.slack.utils import read_slack_thread
 from onyx.onyxbot.slack.utils import respond_in_thread_or_channel
 from onyx.onyxbot.slack.utils import TenantSocketModeClient
 from onyx.onyxbot.slack.utils import update_emote_react
+from onyx.server.query_and_chat.models import ChatMessageDetail
 from onyx.utils.logger import setup_logger
 
 
@@ -72,6 +73,21 @@ def _convert_db_doc_id_to_document_ids(
                     )
                 )
     return citation_list_with_document_id
+
+
+def _build_citation_list(
+    citation_dict: dict[int, int] | None, chat_message_detail: ChatMessageDetail
+) -> list[CitationInfo]:
+    if citation_dict is None:
+        return []
+    else:
+        top_documents = (
+            chat_message_detail.context_docs.top_documents
+            if chat_message_detail.context_docs
+            else []
+        )
+        citation_list = _convert_db_doc_id_to_document_ids(citation_dict, top_documents)
+        return citation_list
 
 
 def handle_doc_feedback_button(
@@ -178,6 +194,10 @@ def handle_publish_ephemeral_message_button(
     client: TenantSocketModeClient,
     action_id: str,
 ) -> None:
+    """
+    This function handles the Share with Everyone/Keep for Yourself buttons
+    for ephemeral messages.
+    """
     channel_id = req.payload["channel"]["id"]
     ephemeral_message_ts = req.payload["container"]["message_ts"]
 
@@ -185,7 +205,11 @@ def handle_publish_ephemeral_message_button(
     response_url = req.payload["response_url"]
     webhook = WebhookClient(url=response_url)
 
+    # The additional data required that was added to buttons.
+    # Specifically, this contains the message_info, channel_conf information
+    # and some additional attributes.
     value_dict = json.loads(req.payload["actions"][0]["value"])
+
     original_question_ts = value_dict.get("original_question_ts")
     if not original_question_ts:
         raise ValueError("Missing original_question_ts in the payload")
@@ -195,7 +219,6 @@ def handle_publish_ephemeral_message_button(
     feedback_reminder_id = value_dict.get("feedback_reminder_id")
 
     slack_message_info = SlackMessageInfo(**value_dict["message_info"])
-
     channel_conf = value_dict.get("channel_conf")
 
     user_email = value_dict.get("message_info", {}).get("email")
@@ -203,6 +226,8 @@ def handle_publish_ephemeral_message_button(
     chat_message_id = json.loads(req.payload["actions"][0]["value"]).get(
         "chat_message_id"
     )
+
+    # Obtain onyx_user and chat_message information
     if not chat_message_id:
         raise ValueError("Missing chat_message_id in the payload")
 
@@ -222,18 +247,10 @@ def handle_publish_ephemeral_message_button(
 
         chat_message_detail = translate_db_message_to_chat_message_detail(chat_message)
 
+        # construct the proper citation format and then the answer in the suitable format
+        # we need to construct the blocks.
         citation_dict = chat_message_detail.citations
-        if citation_dict is None:
-            citation_list = []
-        else:
-            top_documents = (
-                chat_message_detail.context_docs.top_documents
-                if chat_message_detail.context_docs
-                else []
-            )
-            citation_list = _convert_db_doc_id_to_document_ids(
-                citation_dict, top_documents
-            )
+        citation_list = _build_citation_list(citation_dict, chat_message_detail)
 
         onyx_bot_answer = ChatOnyxBotResponse(
             answer=chat_message_detail.message,
@@ -253,9 +270,9 @@ def handle_publish_ephemeral_message_button(
             error_msg=None,
         )
 
+    # Note: we need to use the webhook and the respond_url to update/delete ephemeral messages
     if action_id == SHOW_EVERYONE_ACTION_ID:
-        # Post as non-ephemeral message in thread
-
+        # Convert to non-ephemeral message in thread
         try:
             webhook.send(
                 response_type="ephemeral",
@@ -267,6 +284,7 @@ def handle_publish_ephemeral_message_button(
         except Exception as e:
             logger.error(f"Failed to send webhook: {e}")
 
+        # remove handling of empheremal block and add AI feedback.
         all_blocks = build_slack_response_blocks(
             answer=onyx_bot_answer,
             tenant_id=client.tenant_id,
@@ -279,6 +297,7 @@ def handle_publish_ephemeral_message_button(
             skip_restated_question=True,
         )
         try:
+            # Post in thread as non-ephemeral message
             respond_in_thread_or_channel(
                 client=client.web_client,
                 channel=channel_id,
@@ -295,7 +314,7 @@ def handle_publish_ephemeral_message_button(
             raise e
 
     elif action_id == KEEP_TO_YOURSELF_ACTION_ID:
-        # Keep as ephemeral message in channel, but remove the publish button and add feedback button
+        # Keep as ephemeral message in channel or thread, but remove the publish button and add feedback button
 
         changed_blocks = build_slack_response_blocks(
             answer=onyx_bot_answer,
@@ -311,6 +330,10 @@ def handle_publish_ephemeral_message_button(
 
         try:
             if slack_message_info.thread_to_respond is not None:
+                # There seems to be a bug in slack where an update within the thread
+                # actually leads to the update to be posted in the channel. Therefore,
+                # for now we delete the original ephemeral message and post a new one
+                # if the ephemeral message is in a thread.
                 webhook.send(
                     response_type="ephemeral",
                     text="",
@@ -331,6 +354,7 @@ def handle_publish_ephemeral_message_button(
                     send_as_ephemeral=True,
                 )
             else:
+                # This works fine if the ephemeral message is in the channel
                 webhook.send(
                     response_type="ephemeral",
                     text="Your personal response, sent as an ephemeral message.",

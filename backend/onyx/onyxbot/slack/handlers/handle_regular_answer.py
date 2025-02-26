@@ -85,25 +85,20 @@ def handle_regular_answer(
     message_ts_to_respond_to = message_info.msg_to_respond
     is_bot_msg = message_info.is_bot_msg
 
-    # If the channel mis configured to respond with an ephemeral message,
-    # then we should use the proper user from the email
-    # Otherwise - if not ephemeral - we MUST None as the user to restrict to public docs
-    # as other people in the channel can see the response.
-    if slack_channel_config.channel_config.get("is_ephemeral", False):
-        with get_session_with_tenant(tenant_id=tenant_id) as db_session:
-            if message_info.email:
-                user = get_user_by_email(message_info.email, db_session)
-            else:
-                user = None
-    else:
-        user = None
+    # Capture whether response mode for channel is ephemeral
+    send_as_ephemeral = slack_channel_config.channel_config.get("is_ephemeral", False)
 
-    if message_info.is_bot_dm:
+    # If the channel mis configured to respond with an ephemeral message,
+    # or the message is a dm to the Onyx bot,we should use the proper user from the email
+    # Otherwise - if not ephemeral or DM to Onyx Bo- we MUST None as the user to restrict
+    # to public docs as other people in the channel can see the response.
+
+    user = None
+    if message_info.is_bot_dm or send_as_ephemeral:
         if message_info.email:
             with get_session_with_tenant(tenant_id=tenant_id) as db_session:
                 user = get_user_by_email(message_info.email, db_session)
 
-    send_as_ephemeral = slack_channel_config.channel_config.get("is_ephemeral", False)
     target_thread_ts = (
         None
         if send_as_ephemeral and len(message_info.thread_messages) < 2

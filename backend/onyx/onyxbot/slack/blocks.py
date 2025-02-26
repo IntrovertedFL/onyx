@@ -182,7 +182,7 @@ def _build_ephemeral_publication_block(
         elements=[
             ButtonElement(
                 action_id=SHOW_EVERYONE_ACTION_ID,
-                text=f"📢 Show Everyone in {channel_thread_str}",
+                text=f"📢 Share with Everyone in {channel_thread_str} (Caution!)",
                 value=json.dumps(value_dict),
             ),
             ButtonElement(
@@ -191,7 +191,6 @@ def _build_ephemeral_publication_block(
                 value=json.dumps(value_dict),
             ),
         ],
-        others={"my_data": "my_data"},
     )
 
 
