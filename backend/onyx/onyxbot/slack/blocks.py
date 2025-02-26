@@ -122,6 +122,12 @@ def _build_ephemeral_publication_block(
     if not chat_message_id:
         raise ValueError("Chat message id is required to change the ephemeral message")
 
+    if message_info is None:
+        raise ValueError("Message info is required to change the ephemeral message")
+
+    if channel_conf is None:
+        raise ValueError("Channel config is required to change the ephemeral message")
+
     # check whether the message is in a thread
     if (
         message_info is not None
@@ -137,39 +143,27 @@ def _build_ephemeral_publication_block(
 
     action_values_ephemeral_message_channel_config = (
         ActionValuesEphemeralMessageChannelConfig(
-            channel_name=channel_conf.get("channel_name") if channel_conf else None,
-            respond_tag_only=channel_conf.get("respond_tag_only")
-            if channel_conf
-            else None,
-            respond_to_bots=channel_conf.get("respond_to_bots")
-            if channel_conf
-            else None,
-            is_ephemeral=channel_conf.get("is_ephemeral", False)
-            if channel_conf
-            else False,
-            respond_member_group_list=channel_conf.get("respond_member_group_list")
-            if channel_conf
-            else None,
-            answer_filters=channel_conf.get("answer_filters") if channel_conf else None,
-            follow_up_tags=channel_conf.get("follow_up_tags") if channel_conf else None,
-            show_continue_in_web_ui=channel_conf.get("show_continue_in_web_ui", False)
-            if channel_conf
-            else False,
+            channel_name=channel_conf.get("channel_name"),
+            respond_tag_only=channel_conf.get("respond_tag_only"),
+            respond_to_bots=channel_conf.get("respond_to_bots"),
+            is_ephemeral=channel_conf.get("is_ephemeral", False),
+            respond_member_group_list=channel_conf.get("respond_member_group_list"),
+            answer_filters=channel_conf.get("answer_filters"),
+            follow_up_tags=channel_conf.get("follow_up_tags"),
+            show_continue_in_web_ui=channel_conf.get("show_continue_in_web_ui", False),
         )
     )
 
     action_values_ephemeral_message_message_info = (
         ActionValuesEphemeralMessageMessageInfo(
-            bypass_filters=message_info.bypass_filters if message_info else None,
-            channel_to_respond=message_info.channel_to_respond
-            if message_info
-            else None,
-            msg_to_respond=message_info.msg_to_respond if message_info else None,
-            email=message_info.email if message_info else None,
-            sender_id=message_info.sender_id if message_info else None,
-            thread_messages=message_info.thread_messages if message_info else None,
-            is_bot_msg=message_info.is_bot_msg if message_info else None,
-            is_bot_dm=message_info.is_bot_dm if message_info else None,
+            bypass_filters=message_info.bypass_filters,
+            channel_to_respond=message_info.channel_to_respond,
+            msg_to_respond=message_info.msg_to_respond,
+            email=message_info.email,
+            sender_id=message_info.sender_id,
+            thread_messages=None,
+            is_bot_msg=message_info.is_bot_msg,
+            is_bot_dm=message_info.is_bot_dm,
             thread_to_respond=respond_ts,
         )
     )
