@@ -131,17 +131,10 @@ import {
 
 import { getSourceMetadata } from "@/lib/sources";
 import { UserSettingsModal } from "./modal/UserSettingsModal";
-import { AlignStartVertical } from "lucide-react";
 import { AgenticMessage } from "./message/AgenticMessage";
 import AssistantModal from "../assistants/mine/AssistantModal";
-import {
-  OperatingSystem,
-  useOperatingSystem,
-  useSidebarShortcut,
-} from "@/lib/browserUtilities";
-import { Button } from "@/components/ui/button";
+import { useSidebarShortcut } from "@/lib/browserUtilities";
 import { ConfirmEntityModal } from "@/components/modals/ConfirmEntityModal";
-import { MessageChannel } from "node:worker_threads";
 import { ChatSearchModal } from "./chat_search/ChatSearchModal";
 
 const TEMP_USER_MESSAGE_ID = -1;

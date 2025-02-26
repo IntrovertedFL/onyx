@@ -4,15 +4,12 @@ from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any
-from typing import cast
 
 from google.oauth2.credentials import Credentials as OAuthCredentials  # type: ignore
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials  # type: ignore
 from googleapiclient.errors import HttpError  # type: ignore
 
-from onyx.configs.app_configs import DISABLE_INDEXING_TIME_IMAGE_ANALYSIS
 from onyx.configs.app_configs import INDEX_BATCH_SIZE
-from onyx.configs.app_configs import MAX_FILE_SIZE_BYTES
 from onyx.configs.constants import DocumentSource
 from onyx.connectors.exceptions import ConnectorValidationError
 from onyx.connectors.exceptions import CredentialExpiredError
@@ -37,7 +34,6 @@ from onyx.connectors.google_utils.shared_constants import (
 )
 from onyx.connectors.google_utils.shared_constants import MISSING_SCOPES_ERROR_STR
 from onyx.connectors.google_utils.shared_constants import ONYX_SCOPE_INSTRUCTIONS
-from onyx.connectors.google_utils.shared_constants import SCOPE_DOC_URL
 from onyx.connectors.google_utils.shared_constants import SLIM_BATCH_SIZE
 from onyx.connectors.google_utils.shared_constants import USER_FIELDS
 from onyx.connectors.interfaces import GenerateDocumentsOutput
@@ -47,8 +43,8 @@ from onyx.connectors.interfaces import PollConnector
 from onyx.connectors.interfaces import SecondsSinceUnixEpoch
 from onyx.connectors.interfaces import SlimConnector
 from onyx.connectors.models import ConnectorMissingCredentialError
+from onyx.connectors.vision_enabled_connector import VisionEnabledConnector
 from onyx.indexing.indexing_heartbeat import IndexingHeartbeatInterface
-from onyx.llm.factory import get_default_llm_with_vision
 from onyx.llm.interfaces import LLM
 from onyx.utils.logger import setup_logger
 from onyx.utils.retry_wrapper import retry_builder
@@ -120,7 +116,9 @@ def _clean_requested_drive_ids(
     return valid_requested_drive_ids, filtered_folder_ids
 
 
-class GoogleDriveConnector(LoadConnector, PollConnector, SlimConnector):
+class GoogleDriveConnector(
+    LoadConnector, PollConnector, SlimConnector, VisionEnabledConnector
+):
     def __init__(
         self,
         include_shared_drives: bool = False,
@@ -138,23 +136,23 @@ class GoogleDriveConnector(LoadConnector, PollConnector, SlimConnector):
         continue_on_failure: bool | None = None,
     ) -> None:
         # Check for old input parameters
-        if (
-            folder_paths is not None
-            or include_shared is not None
-            or follow_shortcuts is not None
-            or only_org_public is not None
-            or continue_on_failure is not None
-        ):
-            logger.exception(
-                "Google Drive connector received old input parameters. "
-                "Please visit the docs for help with the new setup: "
-                f"{SCOPE_DOC_URL}"
+        if folder_paths is not None:
+            logger.warning(
+                "The 'folder_paths' parameter is deprecated. Use 'shared_folder_urls' instead."
             )
-            raise ConnectorValidationError(
-                "Google Drive connector received old input parameters. "
-                "Please visit the docs for help with the new setup: "
-                f"{SCOPE_DOC_URL}"
+        if include_shared is not None:
+            logger.warning(
+                "The 'include_shared' parameter is deprecated. Use 'include_files_shared_with_me' instead."
             )
+        if follow_shortcuts is not None:
+            logger.warning("The 'follow_shortcuts' parameter is deprecated.")
+        if only_org_public is not None:
+            logger.warning("The 'only_org_public' parameter is deprecated.")
+        if continue_on_failure is not None:
+            logger.warning("The 'continue_on_failure' parameter is deprecated.")
+
+        # Initialize vision LLM using the mixin
+        self.initialize_vision_llm()
 
         if (
             not include_shared_drives
@@ -201,14 +199,6 @@ class GoogleDriveConnector(LoadConnector, PollConnector, SlimConnector):
         self._creds: OAuthCredentials | ServiceAccountCredentials | None = None
 
         self._retrieved_ids: set[str] = set()
-
-        # Check if image summarization is enabled and if the LLM has vision
-        if not DISABLE_INDEXING_TIME_IMAGE_ANALYSIS:
-            self.image_analysis_llm = get_default_llm_with_vision()
-            if self.image_analysis_llm is None:
-                logger.warning(
-                    "No LLM with vision found, image summarization will be disabled"
-                )
 
     @property
     def primary_admin_email(self) -> str:
@@ -541,39 +531,52 @@ class GoogleDriveConnector(LoadConnector, PollConnector, SlimConnector):
         end: SecondsSinceUnixEpoch | None = None,
     ) -> GenerateDocumentsOutput:
         # Create a larger process pool for file conversion
-        convert_func = partial(
-            _convert_single_file,
-            self.creds,
-            self.primary_admin_email,
-            image_analysis_llm=self.image_analysis_llm,
-        )
-
-        # Process files in larger batches
-        LARGE_BATCH_SIZE = self.batch_size * 4
-        files_to_process = []
-        # Gather the files into batches to be processed in parallel
-        for file in self._fetch_drive_items(is_slim=False, start=start, end=end):
-            if (
-                file.get("size")
-                and int(cast(str, file.get("size"))) > MAX_FILE_SIZE_BYTES
-            ):
-                logger.warning(
-                    f"Skipping file {file.get('name', 'Unknown')} as it is too large: {file.get('size')} bytes"
-                )
-                continue
-
-            files_to_process.append(file)
-            if len(files_to_process) >= LARGE_BATCH_SIZE:
-                yield from _process_files_batch(
-                    files_to_process, convert_func, self.batch_size
-                )
-                files_to_process = []
-
-        # Process any remaining files
-        if files_to_process:
-            yield from _process_files_batch(
-                files_to_process, convert_func, self.batch_size
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            # Prepare a partial function with the credentials and admin email
+            convert_func = partial(
+                _convert_single_file,
+                self.creds,
+                self.primary_admin_email,
+                image_analysis_llm=self.image_analysis_llm,  # Use the mixin's LLM
             )
+
+            # Fetch files in batches
+            files_batch: list[GoogleDriveFileType] = []
+            for file in self._fetch_drive_items(is_slim=False, start=start, end=end):
+                files_batch.append(file)
+
+                if len(files_batch) >= self.batch_size:
+                    # Process the batch
+                    futures = [
+                        executor.submit(convert_func, file) for file in files_batch
+                    ]
+                    documents = []
+                    for future in as_completed(futures):
+                        try:
+                            doc = future.result()
+                            if doc is not None:
+                                documents.append(doc)
+                        except Exception as e:
+                            logger.error(f"Error converting file: {e}")
+
+                    if documents:
+                        yield documents
+                    files_batch = []
+
+            # Process any remaining files
+            if files_batch:
+                futures = [executor.submit(convert_func, file) for file in files_batch]
+                documents = []
+                for future in as_completed(futures):
+                    try:
+                        doc = future.result()
+                        if doc is not None:
+                            documents.append(doc)
+                    except Exception as e:
+                        logger.error(f"Error converting file: {e}")
+
+                if documents:
+                    yield documents
 
     def load_from_state(self) -> GenerateDocumentsOutput:
         try:

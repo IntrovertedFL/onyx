@@ -6,8 +6,11 @@ from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from PIL import Image
 
+from onyx.configs.app_configs import CONTINUE_ON_CONNECTOR_FAILURE
 from onyx.llm.interfaces import LLM
 from onyx.llm.utils import message_to_string
+from onyx.prompts.image_analysis import IMAGE_SUMMARIZATION_SYSTEM_PROMPT
+from onyx.prompts.image_analysis import IMAGE_SUMMARIZATION_USER_PROMPT
 from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
@@ -44,6 +47,38 @@ def summarize_image_pipeline(
     )
 
     return summary
+
+
+def summarize_image_with_error_handling(
+    llm: LLM | None,
+    image_data: bytes,
+    context_name: str,
+    system_prompt: str = IMAGE_SUMMARIZATION_SYSTEM_PROMPT,
+    user_prompt_template: str = IMAGE_SUMMARIZATION_USER_PROMPT,
+) -> str | None:
+    """Wrapper function that handles error cases and configuration consistently.
+
+    Args:
+        llm: The LLM with vision capabilities to use for summarization
+        image_data: The raw image bytes
+        context_name: Name or title of the image for context
+        system_prompt: System prompt to use for the LLM
+        user_prompt_template: Template for the user prompt, should contain {title} placeholder
+
+    Returns:
+        The image summary text, or None if summarization failed or is disabled
+    """
+    if llm is None:
+        return None
+
+    try:
+        user_prompt = user_prompt_template.format(title=context_name)
+        return summarize_image_pipeline(llm, image_data, user_prompt, system_prompt)
+    except Exception as e:
+        if CONTINUE_ON_CONNECTOR_FAILURE:
+            logger.warning(f"Image summarization failed for {context_name}: {e}")
+            return None
+        raise
 
 
 def _summarize_image(

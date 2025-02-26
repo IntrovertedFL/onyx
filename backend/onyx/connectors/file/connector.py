@@ -2,14 +2,12 @@ import os
 from collections.abc import Iterator
 from datetime import datetime
 from datetime import timezone
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from typing import IO
 
 from sqlalchemy.orm import Session
 
-from onyx.configs.app_configs import CONTINUE_ON_CONNECTOR_FAILURE
 from onyx.configs.app_configs import DISABLE_INDEXING_TIME_IMAGE_ANALYSIS
 from onyx.configs.app_configs import INDEX_BATCH_SIZE
 from onyx.configs.constants import DocumentSource
@@ -20,48 +18,22 @@ from onyx.connectors.interfaces import LoadConnector
 from onyx.connectors.models import BasicExpertInfo
 from onyx.connectors.models import Document
 from onyx.connectors.models import Section
+from onyx.connectors.vision_enabled_connector import VisionEnabledConnector
 from onyx.db.engine import get_session_with_current_tenant
-from onyx.db.pg_file_store import create_populate_lobj
 from onyx.db.pg_file_store import get_pgfilestore_by_file_name
-from onyx.db.pg_file_store import upsert_pgfilestore
 from onyx.file_processing.extract_file_text import extract_text_and_images
 from onyx.file_processing.extract_file_text import get_file_ext
 from onyx.file_processing.extract_file_text import is_valid_file_ext
 from onyx.file_processing.extract_file_text import load_files_from_zip
-from onyx.file_processing.image_summarization import summarize_image_pipeline
+from onyx.file_processing.image_utils import store_image_and_create_section
 from onyx.file_store.file_store import get_default_file_store
 from onyx.llm.factory import get_default_llm_with_vision
 from onyx.llm.interfaces import LLM
-from onyx.prompts.image_analysis import IMAGE_SUMMARIZATION_SYSTEM_PROMPT
-from onyx.prompts.image_analysis import IMAGE_SUMMARIZATION_USER_PROMPT
 from onyx.utils.logger import setup_logger
 from shared_configs.configs import POSTGRES_DEFAULT_SCHEMA
 from shared_configs.contextvars import CURRENT_TENANT_ID_CONTEXTVAR
 
 logger = setup_logger()
-
-
-def _summarize_image(
-    llm: LLM,
-    image_data: bytes,
-    file_display_name: str,
-) -> str | None:
-    """
-    Summarizes a single embedded image.
-    """
-    user_prompt = IMAGE_SUMMARIZATION_USER_PROMPT.format(title=file_display_name)
-    try:
-        return summarize_image_pipeline(
-            llm,
-            image_data,
-            user_prompt,
-            system_prompt=IMAGE_SUMMARIZATION_SYSTEM_PROMPT,
-        )
-    except Exception as e:
-        if CONTINUE_ON_CONNECTOR_FAILURE:
-            logger.warning(f"Image summarization failed for {file_display_name}: {e}")
-            return None
-        raise
 
 
 def _read_files_and_metadata(
@@ -105,43 +77,18 @@ def _create_image_section(
     Returns:
         tuple: (Section object, file_name in PGFileStore or None if storage failed)
     """
-    # Store the image in PGFileStore
-    file_name = None
-    try:
-        # Create a unique file name for the embedded image
-        file_name = f"{parent_file_name}_embedded_{idx}"
+    # Create a unique file name for the embedded image
+    file_name = f"{parent_file_name}_embedded_{idx}"
 
-        # Store the image in PGFileStore
-        lobj_oid = create_populate_lobj(BytesIO(image_data), db_session)
-        pgfilestore = upsert_pgfilestore(
-            file_name=file_name,
-            display_name=display_name,
-            file_origin=FileOrigin.OTHER,
-            file_type="image/unknown",  # We could try to detect the image type
-            lobj_oid=lobj_oid,
-            db_session=db_session,
-            commit=True,
-        )
-
-        # Use the actual file name from the record
-        file_name = pgfilestore.file_name
-    except Exception as e:
-        logger.error(f"Failed to store embedded image in PGFileStore: {e}")
-        file_name = None
-        if not CONTINUE_ON_CONNECTOR_FAILURE:
-            raise
-
-    # Summarize the image if we have an LLM
-    summary_text = ""
-    if llm:
-        try:
-            summary_text = _summarize_image(llm, image_data, display_name) or ""
-        except Exception as e:
-            logger.error(f"Unable to summarize embedded image: {e}")
-            if not CONTINUE_ON_CONNECTOR_FAILURE:
-                raise
-
-    return Section(text=summary_text, image_url=file_name), file_name
+    # Use the standardized utility to store the image and create a section
+    return store_image_and_create_section(
+        db_session=db_session,
+        image_data=image_data,
+        file_name=file_name,
+        display_name=display_name,
+        llm=llm,
+        file_origin=FileOrigin.OTHER,
+    )
 
 
 def _process_file(
@@ -294,7 +241,7 @@ def _process_file(
     ]
 
 
-class LocalFileConnector(LoadConnector):
+class LocalFileConnector(LoadConnector, VisionEnabledConnector):
     """
     Connector that reads files from Postgres and yields Documents, including
     optional embedded image extraction.
@@ -306,7 +253,7 @@ class LocalFileConnector(LoadConnector):
         tenant_id: str = POSTGRES_DEFAULT_SCHEMA,
         batch_size: int = INDEX_BATCH_SIZE,
     ) -> None:
-        self.file_locations = [Path(file_location) for file_location in file_locations]
+        self.file_locations = [str(loc) for loc in file_locations]
         self.batch_size = batch_size
         self.tenant_id = tenant_id
         self.pdf_pass: str | None = None
@@ -318,6 +265,9 @@ class LocalFileConnector(LoadConnector):
                 logger.warning(
                     "No LLM with vision found, image summarization will be disabled"
                 )
+
+        # Initialize vision LLM using the mixin
+        self.initialize_vision_llm()
 
     def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
         self.pdf_pass = credentials.get("pdf_password")
@@ -337,7 +287,7 @@ class LocalFileConnector(LoadConnector):
                 current_datetime = datetime.now(timezone.utc)
 
                 files_iter = _read_files_and_metadata(
-                    file_name=str(file_path),
+                    file_name=file_path,
                     db_session=db_session,
                 )
 

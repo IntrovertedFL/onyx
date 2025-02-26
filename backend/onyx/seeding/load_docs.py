@@ -56,7 +56,7 @@ def _create_indexable_chunks(
                 Section(
                     text=preprocessed_doc["content"],
                     link=preprocessed_doc["url"],
-                    image_url=None,
+                    image_file_name=None,
                 )
             ],
             source=DocumentSource.WEB,

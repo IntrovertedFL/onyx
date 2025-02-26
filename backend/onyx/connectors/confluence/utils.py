@@ -22,11 +22,10 @@ from onyx.db.pg_file_store import create_populate_lobj
 from onyx.db.pg_file_store import save_bytes_to_pgfilestore
 from onyx.db.pg_file_store import upsert_pgfilestore
 from onyx.file_processing.extract_file_text import extract_file_text
+from onyx.file_processing.file_validation import is_valid_image_type
 from onyx.file_processing.html_utils import format_document_soup
-from onyx.file_processing.image_summarization import summarize_image_pipeline
+from onyx.file_processing.image_utils import store_image_and_create_section
 from onyx.llm.interfaces import LLM
-from onyx.prompts.image_analysis import IMAGE_SUMMARIZATION_SYSTEM_PROMPT
-from onyx.prompts.image_analysis import IMAGE_SUMMARIZATION_USER_PROMPT
 from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
@@ -191,10 +190,24 @@ def extract_text_from_confluence_html(
     return format_document_soup(soup)
 
 
-def validate_attachment_filetype(media_type: str) -> bool:
-    if media_type.startswith("video/") or media_type == "application/gliffy+json":
-        return False
-    return True
+def validate_attachment_filetype(
+    attachment: dict[str, Any], llm: LLM | None = None
+) -> bool:
+    """
+    Validates if the attachment is a supported file type.
+    If LLM is provided, also checks if it's an image that can be processed.
+    """
+    attachment.get("metadata", {})
+    media_type = attachment.get("metadata", {}).get("mediaType", "")
+
+    # Use the standardized image validation function
+    if media_type.startswith("image/"):
+        return llm is not None and is_valid_image_type(media_type)
+
+    # For non-image files, check if we support the extension
+    title = attachment.get("title", "")
+    extension = title.split(".")[-1].lower() if "." in title else ""
+    return extension in ["pdf", "doc", "docx", "txt", "md", "rtf"]
 
 
 class AttachmentProcessingResult(BaseModel):
@@ -226,30 +239,62 @@ def _download_attachment(
     return resp.content
 
 
-def _extract_or_summarize_attachment(
+def process_attachment(
     confluence_client: OnyxConfluence,
     attachment: dict[str, Any],
     page_context: str,
     llm: LLM | None,
 ) -> AttachmentProcessingResult:
     """
-    Downloads an attachment from Confluence, attempts to extract text if possible,
+    Processes a Confluence attachment. If it's a document, extracts text,
     or if it's an image and an LLM is available, summarizes it. Returns a structured result.
     """
-    media_type = attachment["metadata"]["mediaType"]
+    try:
+        # Get the media type from the attachment metadata
+        media_type = attachment.get("metadata", {}).get("mediaType", "")
 
-    raw_bytes = _download_attachment(confluence_client, attachment)
-    if not raw_bytes:
+        # Validate the attachment type
+        if not validate_attachment_filetype(attachment, llm):
+            return AttachmentProcessingResult(
+                text=None,
+                file_name=None,
+                error=f"Unsupported file type: {media_type}",
+            )
+
+        # Download the attachment
+        raw_bytes = confluence_client.get_attachment_by_id(attachment["id"])
+
+        # Process image attachments with LLM if available
+        if media_type.startswith("image/") and llm:
+            return _process_image_attachment(
+                confluence_client, attachment, page_context, llm, raw_bytes, media_type
+            )
+
+        # Process document attachments
+        try:
+            text = extract_file_text(
+                file=BytesIO(raw_bytes),
+                file_name=attachment["title"],
+            )
+
+            # Skip if the text is too long
+            if len(text) > CONFLUENCE_CONNECTOR_ATTACHMENT_CHAR_COUNT_THRESHOLD:
+                return AttachmentProcessingResult(
+                    text=None,
+                    file_name=None,
+                    error=f"Attachment text too long: {len(text)} chars",
+                )
+
+            return AttachmentProcessingResult(text=text, file_name=None, error=None)
+        except Exception as e:
+            return AttachmentProcessingResult(
+                text=None, file_name=None, error=f"Failed to extract text: {e}"
+            )
+
+    except Exception as e:
         return AttachmentProcessingResult(
-            text=None, file_name=None, error="Download returned no bytes"
+            text=None, file_name=None, error=f"Failed to process attachment: {e}"
         )
-
-    if media_type.startswith("image/") and llm:
-        return _process_image_attachment(
-            confluence_client, attachment, page_context, llm, raw_bytes, media_type
-        )
-    else:
-        return _process_text_attachment(attachment, raw_bytes, media_type)
 
 
 def _process_image_attachment(
@@ -262,28 +307,21 @@ def _process_image_attachment(
 ) -> AttachmentProcessingResult:
     """Process an image attachment by saving it and generating a summary."""
     try:
+        # Use the standardized image storage and section creation
         with get_session_with_current_tenant() as db_session:
-            saved_record = save_bytes_to_pgfilestore(
+            section, file_name = store_image_and_create_section(
                 db_session=db_session,
-                raw_bytes=raw_bytes,
-                media_type=media_type,
-                identifier=attachment["id"],
+                image_data=raw_bytes,
+                file_name=attachment["id"],
                 display_name=attachment["title"],
+                media_type=media_type,
+                llm=llm,
+                file_origin=FileOrigin.CONNECTOR,
             )
-        user_prompt = IMAGE_SUMMARIZATION_USER_PROMPT.format(
-            title=attachment["title"],
-            page_title=attachment["title"],
-            confluence_xml=page_context,
-        )
-        summary_text = summarize_image_pipeline(
-            llm=llm,
-            image_data=raw_bytes,
-            query=user_prompt,
-            system_prompt=IMAGE_SUMMARIZATION_SYSTEM_PROMPT,
-        )
-        return AttachmentProcessingResult(
-            text=summary_text, file_name=saved_record.file_name, error=None
-        )
+
+            return AttachmentProcessingResult(
+                text=section.text, file_name=file_name, error=None
+            )
     except Exception as e:
         msg = f"Image summarization failed for {attachment['title']}: {e}"
         logger.error(msg, exc_info=e)
@@ -363,9 +401,7 @@ def convert_attachment_to_content(
         )
         return None
 
-    result = _extract_or_summarize_attachment(
-        confluence_client, attachment, page_context, llm
-    )
+    result = process_attachment(confluence_client, attachment, page_context, llm)
     if result.error is not None:
         # It's up to you if you'd like to treat errors as skip scenarios or propagate further
         logger.debug(

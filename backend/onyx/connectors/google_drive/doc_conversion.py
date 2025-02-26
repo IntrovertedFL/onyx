@@ -1,5 +1,4 @@
 import io
-import os
 from datetime import datetime
 from datetime import timezone
 
@@ -8,6 +7,7 @@ from googleapiclient.errors import HttpError  # type: ignore
 
 from onyx.configs.app_configs import CONTINUE_ON_CONNECTOR_FAILURE
 from onyx.configs.constants import DocumentSource
+from onyx.configs.constants import FileOrigin
 from onyx.connectors.google_drive.constants import DRIVE_FOLDER_TYPE
 from onyx.connectors.google_drive.constants import DRIVE_SHORTCUT_TYPE
 from onyx.connectors.google_drive.constants import UNSUPPORTED_FILE_TYPE_CONTENT
@@ -19,31 +19,19 @@ from onyx.connectors.google_utils.resources import GoogleDriveService
 from onyx.connectors.models import Document
 from onyx.connectors.models import Section
 from onyx.connectors.models import SlimDocument
+from onyx.db.engine import get_session_with_current_tenant
 from onyx.file_processing.extract_file_text import docx_to_text_and_images
 from onyx.file_processing.extract_file_text import pptx_to_text
 from onyx.file_processing.extract_file_text import read_pdf_file
-from onyx.file_processing.image_summarization import summarize_image_pipeline
+from onyx.file_processing.file_validation import is_valid_image_type
+from onyx.file_processing.image_summarization import summarize_image_with_error_handling
+from onyx.file_processing.image_utils import store_image_and_create_section
 from onyx.file_processing.unstructured import get_unstructured_api_key
 from onyx.file_processing.unstructured import unstructured_to_text
 from onyx.llm.interfaces import LLM
 from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
-
-
-# If you want a separate toggle, you can re-fcheck:
-GDRIVE_IMAGE_SUMMARIZATION_ENABLED = (
-    os.environ.get("GDRIVE_IMAGE_SUMMARIZATION_ENABLED", "").lower() == "true"
-)
-
-# Customize prompts as you see fit:
-GDRIVE_IMAGE_SUMM_SYSTEM_PROMPT = """
-You are an assistant for summarizing images from Google Drive.
-Write a concise summary describing what each image depicts.
-"""
-GDRIVE_IMAGE_SUMM_USER_PROMPT = """
-The image is named '{image_name}'. Summarize it in detail.
-"""
 
 
 def _summarize_drive_image(
@@ -55,22 +43,14 @@ def _summarize_drive_image(
     if not image_analysis_llm:
         return ""
 
-    try:
-        user_prompt = GDRIVE_IMAGE_SUMM_USER_PROMPT.format(image_name=image_name)
-        return (
-            summarize_image_pipeline(
-                llm=image_analysis_llm,
-                image_data=image_data,
-                query=user_prompt,
-                system_prompt=GDRIVE_IMAGE_SUMM_SYSTEM_PROMPT,
-            )
-            or ""
+    return (
+        summarize_image_with_error_handling(
+            llm=image_analysis_llm,
+            image_data=image_data,
+            context_name=image_name,
         )
-    except Exception as e:
-        if CONTINUE_ON_CONNECTOR_FAILURE:
-            logger.warning(f"Image summarization failed for {image_name}: {e}")
-            return ""
-        raise
+        or ""
+    )
 
 
 def is_gdrive_image_mime_type(mime_type: str) -> bool:
@@ -78,7 +58,7 @@ def is_gdrive_image_mime_type(mime_type: str) -> bool:
     Return True if the mime_type is a common image type in GDrive.
     (e.g. 'image/png', 'image/jpeg')
     """
-    return mime_type.startswith("image/")
+    return is_valid_image_type(mime_type)
 
 
 def _extract_sections_basic(
@@ -98,22 +78,25 @@ def _extract_sections_basic(
     if is_gdrive_image_mime_type(mime_type):
         try:
             response = service.files().get_media(fileId=file["id"]).execute()
-            summary_text = _summarize_drive_image(
-                response, file_name, image_analysis_llm
-            )
-            return [
-                Section(
-                    text=summary_text,
-                    image_url=link,  # or some internal placeholder
+
+            with get_session_with_current_tenant() as db_session:
+                section, _ = store_image_and_create_section(
+                    db_session=db_session,
+                    image_data=response,
+                    file_name=file["id"],
+                    display_name=file_name,
+                    media_type=mime_type,
+                    llm=image_analysis_llm,
+                    file_origin=FileOrigin.CONNECTOR,
                 )
-            ]
+                return [section]
         except Exception as e:
             logger.warning(f"Failed to fetch or summarize image: {e}")
             return [
                 Section(
                     link=link,
                     text="",
-                    image_url=link,
+                    image_file_name=link,
                 )
             ]
 
@@ -218,16 +201,23 @@ def _extract_sections_basic(
                 if text.strip():
                     sections.append(Section(link=link, text=text.strip()))
 
-                # Summarize each embedded image if enabled
-                for idx, (img_data, img_name) in enumerate(embedded_images, start=1):
-                    summary = _summarize_drive_image(
-                        img_data, img_name, image_analysis_llm
-                    )
-                    # We'll store the same link or some placeholder
-                    # There's no direct Google link for each embedded sub-image
-                    # so we put a generic image_url referencing doc
-                    embedded_link = f"{link}#embedded_image_{idx}"
-                    sections.append(Section(text=summary, image_url=embedded_link))
+                # Process each embedded image using the standardized function
+                with get_session_with_current_tenant() as db_session:
+                    for idx, (img_data, img_name) in enumerate(
+                        embedded_images, start=1
+                    ):
+                        # Create a unique identifier for the embedded image
+                        embedded_id = f"{file['id']}_embedded_{idx}"
+
+                        section, _ = store_image_and_create_section(
+                            db_session=db_session,
+                            image_data=img_data,
+                            file_name=embedded_id,
+                            display_name=img_name or f"{file_name} - image {idx}",
+                            llm=image_analysis_llm,
+                            file_origin=FileOrigin.CONNECTOR,
+                        )
+                        sections.append(section)
                 return sections
 
             elif mime_type == GDriveMimeType.PDF.value:

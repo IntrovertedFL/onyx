@@ -202,7 +202,7 @@ class Chunker:
         title_prefix: str = "",
         metadata_suffix_semantic: str = "",
         metadata_suffix_keyword: str = "",
-        image_url: str | None = None,
+        image_file_name: str | None = None,
     ) -> None:
         """
         Helper to create a new DocAwareChunk, append it to chunks_list.
@@ -213,7 +213,7 @@ class Chunker:
             blurb=self._extract_blurb(text),
             content=text,
             source_links=links or {0: ""},
-            image_file_name=image_url,
+            image_file_name=image_file_name,
             section_continuation=is_continuation,
             title_prefix=title_prefix,
             metadata_suffix_semantic=metadata_suffix_semantic,
@@ -244,7 +244,7 @@ class Chunker:
             section_text = clean_text(section.text)
             section_link_text = section.link or ""
             # ADDED: if the Section has an image link
-            image_url = section.image_url
+            image_url = section.image_file_name
 
             # If there is no useful content, skip
             if not section_text and (not document.title or section_idx > 0):
@@ -280,7 +280,7 @@ class Chunker:
                     links={0: section_link_text}
                     if section_link_text
                     else {},  # No text offsets needed for images
-                    image_url=image_url,
+                    image_file_name=image_url,
                     title_prefix=title_prefix,
                     metadata_suffix_semantic=metadata_suffix_semantic,
                     metadata_suffix_keyword=metadata_suffix_keyword,
