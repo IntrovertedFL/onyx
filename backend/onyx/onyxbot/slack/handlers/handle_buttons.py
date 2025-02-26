@@ -9,14 +9,20 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.webhook import WebhookClient
 
 from onyx.chat.models import ChatOnyxBotResponse
+from onyx.chat.models import CitationInfo
+from onyx.chat.models import QADocsResponse
 from onyx.configs.constants import MessageType
 from onyx.configs.constants import SearchFeedbackType
 from onyx.configs.onyxbot_configs import DANSWER_FOLLOWUP_EMOJI
 from onyx.connectors.slack.utils import expert_info_from_slack_id
 from onyx.connectors.slack.utils import make_slack_api_rate_limited
+from onyx.context.search.models import SavedSearchDoc
+from onyx.db.chat import get_chat_message
+from onyx.db.chat import translate_db_message_to_chat_message_detail
 from onyx.db.engine import get_session_with_tenant
 from onyx.db.feedback import create_chat_message_feedback
 from onyx.db.feedback import create_doc_retrieval_feedback
+from onyx.db.users import get_user_by_email
 from onyx.onyxbot.slack.blocks import build_follow_up_resolved_blocks
 from onyx.onyxbot.slack.blocks import build_slack_response_blocks
 from onyx.onyxbot.slack.blocks import get_document_feedback_blocks
@@ -48,6 +54,24 @@ from onyx.utils.logger import setup_logger
 
 
 logger = setup_logger()
+
+
+def _convert_db_doc_id_to_document_ids(
+    citation_dict: dict[int, int], top_documents: list[SavedSearchDoc]
+) -> list[CitationInfo]:
+    citation_list_with_document_id = []
+    for citation_num, db_doc_id in citation_dict.items():
+        if db_doc_id is not None:
+            matching_doc = next(
+                (d for d in top_documents if d.db_doc_id == db_doc_id), None
+            )
+            if matching_doc:
+                citation_list_with_document_id.append(
+                    CitationInfo(
+                        citation_num=citation_num, document_id=matching_doc.document_id
+                    )
+                )
+    return citation_list_with_document_id
 
 
 def handle_doc_feedback_button(
@@ -156,38 +180,78 @@ def handle_publish_ephemeral_message_button(
 ) -> None:
     channel_id = req.payload["channel"]["id"]
     ephemeral_message_ts = req.payload["container"]["message_ts"]
+
+    slack_sender_id = req.payload["user"]["id"]
     response_url = req.payload["response_url"]
     webhook = WebhookClient(url=response_url)
 
     value_dict = json.loads(req.payload["actions"][0]["value"])
-    original_question_ts = value_dict["original_question_ts"]
-    feedback_reminder_id = value_dict["feedback_reminder_id"]
-    slack_message_info = SlackMessageInfo(**value_dict["message_info"])
-    answer = ChatOnyxBotResponse(**value_dict["answer"])
-    tenant_id = value_dict["tenant_id"]
-
-    user_id = req.payload["user"]["id"]
-
+    original_question_ts = value_dict.get("original_question_ts")
     if not original_question_ts:
         raise ValueError("Missing original_question_ts in the payload")
     if not ephemeral_message_ts:
         raise ValueError("Missing ephemeral_message_ts in the payload")
 
-    # Fetch the message content first
-    # try:
-    #     message_response = client.web_client.conversations_history(
-    #         channel=channel_id,
-    #         latest=ephemeral_message_ts,
-    #         limit=1,
-    #         inclusive=True
-    #     )
-    #     message = message_response["messages"][0]
-    #     message_blocks = message.get("blocks", [])
-    #     message_text = message.get("text", "")
+    feedback_reminder_id = value_dict.get("feedback_reminder_id")
 
-    # except Exception as e:
-    #     logger.error(f"Failed to fetch message content: {e}")
-    #     return
+    slack_message_info = SlackMessageInfo(**value_dict["message_info"])
+
+    channel_conf = value_dict.get("channel_conf")
+
+    user_email = value_dict.get("message_info", {}).get("email")
+
+    chat_message_id = json.loads(req.payload["actions"][0]["value"]).get(
+        "chat_message_id"
+    )
+    if not chat_message_id:
+        raise ValueError("Missing chat_message_id in the payload")
+
+    with get_session_with_tenant(tenant_id=client.tenant_id) as db_session:
+        onyx_user = get_user_by_email(user_email, db_session)
+        if not onyx_user:
+            raise ValueError("Cannot determine onyx_user_id from email in payload")
+        try:
+            chat_message = get_chat_message(chat_message_id, onyx_user.id, db_session)
+        except ValueError:
+            chat_message = get_chat_message(
+                chat_message_id, None, db_session
+            )  # is this good idea?
+        except Exception as e:
+            logger.error(f"Failed to get chat message: {e}")
+            raise e
+
+        chat_message_detail = translate_db_message_to_chat_message_detail(chat_message)
+
+        citation_dict = chat_message_detail.citations
+        if citation_dict is None:
+            citation_list = []
+        else:
+            top_documents = (
+                chat_message_detail.context_docs.top_documents
+                if chat_message_detail.context_docs
+                else []
+            )
+            citation_list = _convert_db_doc_id_to_document_ids(
+                citation_dict, top_documents
+            )
+
+        onyx_bot_answer = ChatOnyxBotResponse(
+            answer=chat_message_detail.message,
+            citations=citation_list,
+            chat_message_id=chat_message_id,
+            docs=QADocsResponse(
+                top_documents=chat_message_detail.context_docs.top_documents
+                if chat_message_detail.context_docs
+                else [],
+                predicted_flow=None,
+                predicted_search=None,
+                applied_source_filters=None,
+                applied_time_cutoff=None,
+                recency_bias_multiplier=1.0,
+            ),
+            llm_selected_doc_indices=None,
+            error_msg=None,
+        )
 
     if action_id == SHOW_EVERYONE_ACTION_ID:
         # Post as non-ephemeral message in thread
@@ -204,14 +268,14 @@ def handle_publish_ephemeral_message_button(
             logger.error(f"Failed to send webhook: {e}")
 
         all_blocks = build_slack_response_blocks(
-            answer=answer,
-            tenant_id=tenant_id,
+            answer=onyx_bot_answer,
+            tenant_id=client.tenant_id,
             message_info=slack_message_info,
-            channel_conf=None,
+            channel_conf=channel_conf,
             use_citations=True,
-            offer_ephemeral_publication=False,
-            skip_ai_feedback=False,
             feedback_reminder_id=feedback_reminder_id,
+            skip_ai_feedback=False,
+            offer_ephemeral_publication=False,
             skip_restated_question=True,
         )
         try:
@@ -234,14 +298,14 @@ def handle_publish_ephemeral_message_button(
         # Keep as ephemeral message in channel, but remove the publish button and add feedback button
 
         changed_blocks = build_slack_response_blocks(
-            answer=answer,
-            tenant_id=tenant_id,
+            answer=onyx_bot_answer,
+            tenant_id=client.tenant_id,
             message_info=slack_message_info,
-            channel_conf=None,
+            channel_conf=channel_conf,
             use_citations=True,
-            offer_ephemeral_publication=False,
-            skip_ai_feedback=False,
             feedback_reminder_id=feedback_reminder_id,
+            skip_ai_feedback=False,
+            offer_ephemeral_publication=False,
             skip_restated_question=True,
         )
 
@@ -258,8 +322,8 @@ def handle_publish_ephemeral_message_button(
                 respond_in_thread_or_channel(
                     client=client.web_client,
                     channel=channel_id,
-                    receiver_ids=[user_id],
-                    text="Hello! Onyx has some results for you!",
+                    receiver_ids=[slack_sender_id],
+                    text="Your personal response, sent as an ephemeral message.",
                     blocks=changed_blocks,
                     thread_ts=original_question_ts,
                     # don't unfurl, since otherwise we will have 5+ previews which makes the message very long
@@ -269,7 +333,7 @@ def handle_publish_ephemeral_message_button(
             else:
                 webhook.send(
                     response_type="ephemeral",
-                    text="Your personal response, sent as an ephemeral message",
+                    text="Your personal response, sent as an ephemeral message.",
                     blocks=changed_blocks,
                     replace_original=True,
                     delete_original=False,

@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import Any
 from typing import cast
 
 import pytz
@@ -113,12 +114,13 @@ def _build_ephemeral_publication_block(
     channel_id: str,
     original_question_ts: str | None = None,
     tenant_id: str | None = None,
-    answer: ChatOnyxBotResponse | None = None,
+    chat_message_id: int | None = None,
     message_info: SlackMessageInfo | None = None,
+    channel_conf: ChannelConfig | None = None,
     feedback_reminder_id: str | None = None,
 ) -> Block:
-    if not answer or not answer.answer:
-        raise ValueError("Answer is required to change the ephemeral message")
+    if not chat_message_id:
+        raise ValueError("Chat message id is required to change the ephemeral message")
 
     # check whether the message is in a thread
     if (
@@ -128,23 +130,16 @@ def _build_ephemeral_publication_block(
         and (message_info.msg_to_respond == message_info.thread_to_respond)
     ):
         respond_ts = None
+        channel_thread_str = "Channel"
     else:
         respond_ts = original_question_ts
+        channel_thread_str = "Thread"
 
-    value_dict = {
+    value_dict: dict[str, Any] = {
         "original_question_ts": original_question_ts,
         "feedback_reminder_id": feedback_reminder_id,
         "tenant_id": tenant_id,
-        "answer": {
-            "answer": answer.answer,
-            "answer_valid": answer.answer_valid if answer else None,
-            "chat_message_id": answer.chat_message_id if answer else None,
-            "citations": answer.citations if answer else None,
-            "docs": answer.docs if answer else None,
-            "llm_selected_doc_indices": answer.llm_selected_doc_indices
-            if answer
-            else None,
-        },
+        "chat_message_id": chat_message_id,
         "message_info": {
             "bypass_filters": message_info.bypass_filters if message_info else None,
             "channel_to_respond": message_info.channel_to_respond
@@ -153,10 +148,20 @@ def _build_ephemeral_publication_block(
             "msg_to_respond": message_info.msg_to_respond if message_info else None,
             "email": message_info.email if message_info else None,
             "sender_id": message_info.sender_id if message_info else None,
-            "thread_messages": message_info.thread_messages if message_info else None,
+            "thread_messages": [],  # message_info.thread_messages if message_info else None,
             "is_bot_msg": message_info.is_bot_msg if message_info else None,
             "is_bot_dm": message_info.is_bot_dm if message_info else None,
             "thread_to_respond": respond_ts,
+        },
+        "channel_conf": {
+            "channel_name": channel_conf.get("channel_name"),
+            "respond_tag_only": channel_conf.get("respond_tag_only"),
+            "respond_to_bots": channel_conf.get("respond_to_bots"),
+            "is_ephemeral": channel_conf.get("is_ephemeral"),
+            "respond_member_group_list": channel_conf.get("respond_member_group_list"),
+            "answer_filters": channel_conf.get("answer_filters"),
+            "follow_up_tags": channel_conf.get("follow_up_tags"),
+            "show_continue_in_web_ui": channel_conf.get("show_continue_in_web_ui"),
         },
     }
 
@@ -165,7 +170,7 @@ def _build_ephemeral_publication_block(
         elements=[
             ButtonElement(
                 action_id=SHOW_EVERYONE_ACTION_ID,
-                text="📢 Show Everyone in Channel",
+                text=f"📢 Show Everyone in {channel_thread_str}",
                 value=json.dumps(value_dict),
             ),
             ButtonElement(
@@ -614,8 +619,9 @@ def build_slack_response_blocks(
                 channel_id=message_info.channel_to_respond,
                 original_question_ts=message_info.msg_to_respond,
                 tenant_id=tenant_id,
-                answer=answer,
+                chat_message_id=answer.chat_message_id,
                 message_info=message_info,
+                channel_conf=channel_conf,
                 feedback_reminder_id=feedback_reminder_id,
             )
         )
