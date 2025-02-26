@@ -52,7 +52,6 @@ def update_image_sections_with_query(
     logger = setup_logger()
     logger.debug(f"Starting image section update with query: {query}")
 
-    # Collect all chunks with images that need processing
     chunks_with_images = []
     for section in sections:
         for chunk in section.chunks:
@@ -65,7 +64,6 @@ def update_image_sections_with_query(
 
     logger.info(f"Found {len(chunks_with_images)} chunks with images to process")
 
-    # Define the function to process a single image chunk
     def process_image_chunk(chunk: InferenceChunk) -> tuple[str, str]:
         try:
             logger.debug(
@@ -105,12 +103,9 @@ def update_image_sections_with_query(
                 ),
             ]
 
-            print(f"Calling LLM for image analysis on chunk {chunk.unique_id}")
             raw_response = llm.invoke(messages)
 
             answer_text = message_to_string(raw_response).strip()
-            print(f"Received LLM response for image {chunk.image_file_name}")
-            print(f"Answer text: {answer_text}")
             return (
                 chunk.unique_id,
                 answer_text if answer_text else "No relevant info found.",
@@ -122,12 +117,10 @@ def update_image_sections_with_query(
             )
             return chunk.unique_id, "Error analyzing image."
 
-    # Create parallel tasks for each image chunk
     image_processing_tasks = [
         FunctionCall(process_image_chunk, (chunk,)) for chunk in chunks_with_images
     ]
 
-    # Run the image processing tasks in parallel
     logger.info(
         f"Starting parallel processing of {len(image_processing_tasks)} image tasks"
     )
@@ -393,7 +386,6 @@ def search_postprocessing(
     llm: LLM,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
 ) -> Iterator[list[InferenceSection] | list[SectionRelevancePiece]]:
-    print("INSIDE THE POST PROCESSING")
     post_processing_tasks: list[FunctionCall] = []
 
     if not retrieved_sections:

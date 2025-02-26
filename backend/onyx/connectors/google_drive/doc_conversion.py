@@ -2,7 +2,6 @@ import io
 import os
 from datetime import datetime
 from datetime import timezone
-from typing import Optional
 
 from googleapiclient.discovery import build  # type: ignore
 from googleapiclient.errors import HttpError  # type: ignore
@@ -31,9 +30,6 @@ from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
 
-# ---------- NEW ENVIRONMENTS / GLOBALS -----------
-# The connector can pass an LLM here
-_DRIVE_LLM_FOR_IMAGE_SUMMARIZATION: Optional[LLM] = None
 
 # If you want a separate toggle, you can re-fcheck:
 GDRIVE_IMAGE_SUMMARIZATION_ENABLED = (
@@ -50,27 +46,20 @@ The image is named '{image_name}'. Summarize it in detail.
 """
 
 
-def set_drive_llm_for_image_summarization(llm: LLM | None) -> None:
+def _summarize_drive_image(
+    image_data: bytes, image_name: str, image_analysis_llm: LLM | None
+) -> str:
     """
-    Called by the connector after credentials are loaded.
-    This way, the doc_conversion can access the same LLM for summarizing images.
+    Summarize the given image using the provided LLM.
     """
-    global _DRIVE_LLM_FOR_IMAGE_SUMMARIZATION
-    _DRIVE_LLM_FOR_IMAGE_SUMMARIZATION = llm
-
-
-def _summarize_drive_image(image_data: bytes, image_name: str) -> str:
-    """
-    Summarize the given image using our global LLM (if available).
-    """
-    if not GDRIVE_IMAGE_SUMMARIZATION_ENABLED or not _DRIVE_LLM_FOR_IMAGE_SUMMARIZATION:
+    if not image_analysis_llm:
         return ""
 
     try:
         user_prompt = GDRIVE_IMAGE_SUMM_USER_PROMPT.format(image_name=image_name)
         return (
             summarize_image_pipeline(
-                llm=_DRIVE_LLM_FOR_IMAGE_SUMMARIZATION,
+                llm=image_analysis_llm,
                 image_data=image_data,
                 query=user_prompt,
                 system_prompt=GDRIVE_IMAGE_SUMM_SYSTEM_PROMPT,
@@ -95,7 +84,7 @@ def is_gdrive_image_mime_type(mime_type: str) -> bool:
 def _extract_sections_basic(
     file: dict[str, str],
     service: GoogleDriveService,
-    llm: LLM | None = None,  # not mandatory, we can keep it for reference
+    image_analysis_llm: LLM | None = None,
 ) -> list[Section]:
     """
     Extends the existing logic to handle either a docx with embedded images
@@ -109,7 +98,9 @@ def _extract_sections_basic(
     if is_gdrive_image_mime_type(mime_type):
         try:
             response = service.files().get_media(fileId=file["id"]).execute()
-            summary_text = _summarize_drive_image(response, file_name)
+            summary_text = _summarize_drive_image(
+                response, file_name, image_analysis_llm
+            )
             return [
                 Section(
                     text=summary_text,
@@ -229,7 +220,9 @@ def _extract_sections_basic(
 
                 # Summarize each embedded image if enabled
                 for idx, (img_data, img_name) in enumerate(embedded_images, start=1):
-                    summary = _summarize_drive_image(img_data, img_name)
+                    summary = _summarize_drive_image(
+                        img_data, img_name, image_analysis_llm
+                    )
                     # We'll store the same link or some placeholder
                     # There's no direct Google link for each embedded sub-image
                     # so we put a generic image_url referencing doc
@@ -256,7 +249,7 @@ def convert_drive_item_to_document(
     file: GoogleDriveFileType,
     drive_service: GoogleDriveService,
     docs_service: GoogleDocsService,
-    llm: LLM | None = None,
+    image_analysis_llm: LLM | None,
 ) -> Document | None:
     """
     Main entry point for converting a Google Drive file => Document object.
@@ -282,7 +275,7 @@ def convert_drive_item_to_document(
 
         # If not a doc, or if we failed above, do our 'basic' approach
         if not sections:
-            sections = _extract_sections_basic(file, drive_service, llm)
+            sections = _extract_sections_basic(file, drive_service, image_analysis_llm)
 
         if not sections:
             return None

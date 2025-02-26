@@ -409,8 +409,6 @@ class DefaultMultiLLM(LLM):
         self._record_call(processed_prompt)
 
         try:
-            print("the prompt is")
-            print(processed_prompt)
             return litellm.completion(
                 mock_response=MOCK_LLM_RESPONSE,
                 # model choice

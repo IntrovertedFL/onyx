@@ -72,7 +72,7 @@ def _convert_single_file(
     creds: Any,
     primary_admin_email: str,
     file: dict[str, Any],
-    llm: LLM | None,
+    image_analysis_llm: LLM | None,
 ) -> Any:
     user_email = file.get("owners", [{}])[0].get("emailAddress") or primary_admin_email
     user_drive_service = get_drive_service(creds, user_email=user_email)
@@ -81,7 +81,7 @@ def _convert_single_file(
         file=file,
         drive_service=user_drive_service,
         docs_service=docs_service,
-        llm=llm,  # pass the LLM so doc_conversion can summarize images
+        image_analysis_llm=image_analysis_llm,  # pass the LLM so doc_conversion can summarize images
     )
 
 
@@ -545,7 +545,7 @@ class GoogleDriveConnector(LoadConnector, PollConnector, SlimConnector):
             _convert_single_file,
             self.creds,
             self.primary_admin_email,
-            llm=self.image_analysis_llm,
+            image_analysis_llm=self.image_analysis_llm,
         )
 
         # Process files in larger batches

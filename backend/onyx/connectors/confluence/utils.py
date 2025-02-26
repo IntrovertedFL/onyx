@@ -200,8 +200,8 @@ def validate_attachment_filetype(media_type: str) -> bool:
 class AttachmentProcessingResult(BaseModel):
     """
     A container for results after processing a Confluence attachment.
-    'text' might be textual extraction or image summarization.
-    'file_name' is the final file name used in PGFileStore.
+    'text' is the textual content of the attachment.
+    'file_name' is the final file name used in PGFileStore to store the content.
     'error' holds an exception or string if something failed.
     """
 
