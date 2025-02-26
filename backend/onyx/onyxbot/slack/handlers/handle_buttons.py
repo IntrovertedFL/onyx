@@ -75,9 +75,8 @@ def _convert_db_doc_id_to_document_ids(
     return citation_list_with_document_id
 
 
-def _build_citation_list(
-    citation_dict: dict[int, int] | None, chat_message_detail: ChatMessageDetail
-) -> list[CitationInfo]:
+def _build_citation_list(chat_message_detail: ChatMessageDetail) -> list[CitationInfo]:
+    citation_dict = chat_message_detail.citations
     if citation_dict is None:
         return []
     else:
@@ -249,8 +248,7 @@ def handle_publish_ephemeral_message_button(
 
         # construct the proper citation format and then the answer in the suitable format
         # we need to construct the blocks.
-        citation_dict = chat_message_detail.citations
-        citation_list = _build_citation_list(citation_dict, chat_message_detail)
+        citation_list = _build_citation_list(chat_message_detail)
 
         onyx_bot_answer = ChatOnyxBotResponse(
             answer=chat_message_detail.message,

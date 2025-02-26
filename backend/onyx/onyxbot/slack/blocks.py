@@ -1,6 +1,4 @@
-import json
 from datetime import datetime
-from typing import Any
 from typing import cast
 
 import pytz
@@ -38,6 +36,9 @@ from onyx.onyxbot.slack.constants import LIKE_BLOCK_ACTION_ID
 from onyx.onyxbot.slack.constants import SHOW_EVERYONE_ACTION_ID
 from onyx.onyxbot.slack.formatting import format_slack_message
 from onyx.onyxbot.slack.icons import source_to_github_img_link
+from onyx.onyxbot.slack.models import ActionValuesEphemeralMessage
+from onyx.onyxbot.slack.models import ActionValuesEphemeralMessageChannelConfig
+from onyx.onyxbot.slack.models import ActionValuesEphemeralMessageMessageInfo
 from onyx.onyxbot.slack.models import SlackMessageInfo
 from onyx.onyxbot.slack.utils import build_continue_in_web_ui_id
 from onyx.onyxbot.slack.utils import build_feedback_id
@@ -113,7 +114,6 @@ def _build_qa_feedback_block(
 def _build_ephemeral_publication_block(
     channel_id: str,
     original_question_ts: str | None = None,
-    tenant_id: str | None = None,
     chat_message_id: int | None = None,
     message_info: SlackMessageInfo | None = None,
     channel_conf: ChannelConfig | None = None,
@@ -135,48 +135,52 @@ def _build_ephemeral_publication_block(
         respond_ts = original_question_ts
         channel_thread_str = "Thread"
 
-    # This is a dict as a key component, channel_conf, as a TypeDict itself
-    value_dict: dict[str, Any] = {
-        "original_question_ts": original_question_ts,
-        "feedback_reminder_id": feedback_reminder_id,
-        "tenant_id": tenant_id,
-        "chat_message_id": chat_message_id,
-        "message_info": {
-            "bypass_filters": message_info.bypass_filters if message_info else None,
-            "channel_to_respond": message_info.channel_to_respond
+    action_values_ephemeral_message_channel_config = (
+        ActionValuesEphemeralMessageChannelConfig(
+            channel_name=channel_conf.get("channel_name") if channel_conf else None,
+            respond_tag_only=channel_conf.get("respond_tag_only")
+            if channel_conf
+            else None,
+            respond_to_bots=channel_conf.get("respond_to_bots")
+            if channel_conf
+            else None,
+            is_ephemeral=channel_conf.get("is_ephemeral", False)
+            if channel_conf
+            else False,
+            respond_member_group_list=channel_conf.get("respond_member_group_list")
+            if channel_conf
+            else None,
+            answer_filters=channel_conf.get("answer_filters") if channel_conf else None,
+            follow_up_tags=channel_conf.get("follow_up_tags") if channel_conf else None,
+            show_continue_in_web_ui=channel_conf.get("show_continue_in_web_ui", False)
+            if channel_conf
+            else False,
+        )
+    )
+
+    action_values_ephemeral_message_message_info = (
+        ActionValuesEphemeralMessageMessageInfo(
+            bypass_filters=message_info.bypass_filters if message_info else None,
+            channel_to_respond=message_info.channel_to_respond
             if message_info
             else None,
-            "msg_to_respond": message_info.msg_to_respond if message_info else None,
-            "email": message_info.email if message_info else None,
-            "sender_id": message_info.sender_id if message_info else None,
-            "thread_messages": [],  # message_info.thread_messages if message_info else None,
-            "is_bot_msg": message_info.is_bot_msg if message_info else None,
-            "is_bot_dm": message_info.is_bot_dm if message_info else None,
-            "thread_to_respond": respond_ts,
-        },
-        "channel_conf": {
-            "channel_name": channel_conf.get("channel_name") if channel_conf else None,
-            "respond_tag_only": channel_conf.get("respond_tag_only")
-            if channel_conf
-            else None,
-            "respond_to_bots": channel_conf.get("respond_to_bots")
-            if channel_conf
-            else None,
-            "is_ephemeral": channel_conf.get("is_ephemeral") if channel_conf else None,
-            "respond_member_group_list": channel_conf.get("respond_member_group_list")
-            if channel_conf
-            else None,
-            "answer_filters": channel_conf.get("answer_filters")
-            if channel_conf
-            else None,
-            "follow_up_tags": channel_conf.get("follow_up_tags")
-            if channel_conf
-            else None,
-            "show_continue_in_web_ui": channel_conf.get("show_continue_in_web_ui")
-            if channel_conf
-            else None,
-        },
-    }
+            msg_to_respond=message_info.msg_to_respond if message_info else None,
+            email=message_info.email if message_info else None,
+            sender_id=message_info.sender_id if message_info else None,
+            thread_messages=message_info.thread_messages if message_info else None,
+            is_bot_msg=message_info.is_bot_msg if message_info else None,
+            is_bot_dm=message_info.is_bot_dm if message_info else None,
+            thread_to_respond=respond_ts,
+        )
+    )
+
+    action_values_ephemeral_message = ActionValuesEphemeralMessage(
+        original_question_ts=original_question_ts,
+        feedback_reminder_id=feedback_reminder_id,
+        chat_message_id=chat_message_id,
+        message_info=action_values_ephemeral_message_message_info,
+        channel_conf=action_values_ephemeral_message_channel_config,
+    )
 
     return ActionsBlock(
         block_id=build_publish_ephemeral_message_id(original_question_ts),
@@ -184,12 +188,12 @@ def _build_ephemeral_publication_block(
             ButtonElement(
                 action_id=SHOW_EVERYONE_ACTION_ID,
                 text=f"📢 Share with Everyone in {channel_thread_str} (Caution!)",
-                value=json.dumps(value_dict),
+                value=action_values_ephemeral_message.model_dump_json(),
             ),
             ButtonElement(
                 action_id=KEEP_TO_YOURSELF_ACTION_ID,
                 text="🤫  Keep to Yourself",
-                value=json.dumps(value_dict),
+                value=action_values_ephemeral_message.model_dump_json(),
             ),
         ],
     )
@@ -630,7 +634,6 @@ def build_slack_response_blocks(
             _build_ephemeral_publication_block(
                 channel_id=message_info.channel_to_respond,
                 original_question_ts=message_info.msg_to_respond,
-                tenant_id=tenant_id,
                 chat_message_id=answer.chat_message_id,
                 message_info=message_info,
                 channel_conf=channel_conf,
