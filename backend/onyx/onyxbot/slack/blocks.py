@@ -154,14 +154,26 @@ def _build_ephemeral_publication_block(
             "thread_to_respond": respond_ts,
         },
         "channel_conf": {
-            "channel_name": channel_conf.get("channel_name"),
-            "respond_tag_only": channel_conf.get("respond_tag_only"),
-            "respond_to_bots": channel_conf.get("respond_to_bots"),
-            "is_ephemeral": channel_conf.get("is_ephemeral"),
-            "respond_member_group_list": channel_conf.get("respond_member_group_list"),
-            "answer_filters": channel_conf.get("answer_filters"),
-            "follow_up_tags": channel_conf.get("follow_up_tags"),
-            "show_continue_in_web_ui": channel_conf.get("show_continue_in_web_ui"),
+            "channel_name": channel_conf.get("channel_name") if channel_conf else None,
+            "respond_tag_only": channel_conf.get("respond_tag_only")
+            if channel_conf
+            else None,
+            "respond_to_bots": channel_conf.get("respond_to_bots")
+            if channel_conf
+            else None,
+            "is_ephemeral": channel_conf.get("is_ephemeral") if channel_conf else None,
+            "respond_member_group_list": channel_conf.get("respond_member_group_list")
+            if channel_conf
+            else None,
+            "answer_filters": channel_conf.get("answer_filters")
+            if channel_conf
+            else None,
+            "follow_up_tags": channel_conf.get("follow_up_tags")
+            if channel_conf
+            else None,
+            "show_continue_in_web_ui": channel_conf.get("show_continue_in_web_ui")
+            if channel_conf
+            else None,
         },
     }
 
