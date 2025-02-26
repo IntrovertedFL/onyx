@@ -15,7 +15,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     # 1) Convert all existing rows to lowercase
     op.execute(
         """
@@ -32,7 +32,7 @@ def upgrade():
     )
 
 
-def downgrade():
+def downgrade() -> None:
     # Drop the check constraint
     op.drop_constraint(
         "ensure_lowercase_email",
