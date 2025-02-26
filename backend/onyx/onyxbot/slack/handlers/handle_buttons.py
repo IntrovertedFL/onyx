@@ -1,3 +1,4 @@
+import json
 from typing import Any
 from typing import cast
 
@@ -5,7 +6,9 @@ from slack_sdk import WebClient
 from slack_sdk.models.blocks import SectionBlock
 from slack_sdk.models.views import View
 from slack_sdk.socket_mode.request import SocketModeRequest
+from slack_sdk.webhook import WebhookClient
 
+from onyx.chat.models import ChatOnyxBotResponse
 from onyx.configs.constants import MessageType
 from onyx.configs.constants import SearchFeedbackType
 from onyx.configs.onyxbot_configs import DANSWER_FOLLOWUP_EMOJI
@@ -15,11 +18,14 @@ from onyx.db.engine import get_session_with_tenant
 from onyx.db.feedback import create_chat_message_feedback
 from onyx.db.feedback import create_doc_retrieval_feedback
 from onyx.onyxbot.slack.blocks import build_follow_up_resolved_blocks
+from onyx.onyxbot.slack.blocks import build_slack_response_blocks
 from onyx.onyxbot.slack.blocks import get_document_feedback_blocks
 from onyx.onyxbot.slack.config import get_slack_channel_config_for_bot_and_channel
 from onyx.onyxbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
 from onyx.onyxbot.slack.constants import FeedbackVisibility
+from onyx.onyxbot.slack.constants import KEEP_TO_YOURSELF_ACTION_ID
 from onyx.onyxbot.slack.constants import LIKE_BLOCK_ACTION_ID
+from onyx.onyxbot.slack.constants import SHOW_EVERYONE_ACTION_ID
 from onyx.onyxbot.slack.constants import VIEW_DOC_FEEDBACK_ID
 from onyx.onyxbot.slack.handlers.handle_message import (
     remove_scheduled_feedback_reminder,
@@ -35,7 +41,7 @@ from onyx.onyxbot.slack.utils import fetch_slack_user_ids_from_emails
 from onyx.onyxbot.slack.utils import get_channel_name_from_id
 from onyx.onyxbot.slack.utils import get_feedback_visibility
 from onyx.onyxbot.slack.utils import read_slack_thread
-from onyx.onyxbot.slack.utils import respond_in_thread
+from onyx.onyxbot.slack.utils import respond_in_thread_or_channel
 from onyx.onyxbot.slack.utils import TenantSocketModeClient
 from onyx.onyxbot.slack.utils import update_emote_react
 from onyx.utils.logger import setup_logger
@@ -106,7 +112,7 @@ def handle_generate_answer_button(
 
     # tell the user that we're working on it
     # Send an ephemeral message to the user that we're generating the answer
-    respond_in_thread(
+    respond_in_thread_or_channel(
         client=client.web_client,
         channel=channel_id,
         receiver_ids=[user_id],
@@ -141,6 +147,135 @@ def handle_generate_answer_button(
             logger=logger,
             feedback_reminder_id=None,
         )
+
+
+def handle_publish_ephemeral_message_button(
+    req: SocketModeRequest,
+    client: TenantSocketModeClient,
+    action_id: str,
+) -> None:
+    channel_id = req.payload["channel"]["id"]
+    ephemeral_message_ts = req.payload["container"]["message_ts"]
+    response_url = req.payload["response_url"]
+    webhook = WebhookClient(url=response_url)
+
+    value_dict = json.loads(req.payload["actions"][0]["value"])
+    original_question_ts = value_dict["original_question_ts"]
+    feedback_reminder_id = value_dict["feedback_reminder_id"]
+    slack_message_info = SlackMessageInfo(**value_dict["message_info"])
+    answer = ChatOnyxBotResponse(**value_dict["answer"])
+    tenant_id = value_dict["tenant_id"]
+
+    user_id = req.payload["user"]["id"]
+
+    if not original_question_ts:
+        raise ValueError("Missing original_question_ts in the payload")
+    if not ephemeral_message_ts:
+        raise ValueError("Missing ephemeral_message_ts in the payload")
+
+    # Fetch the message content first
+    # try:
+    #     message_response = client.web_client.conversations_history(
+    #         channel=channel_id,
+    #         latest=ephemeral_message_ts,
+    #         limit=1,
+    #         inclusive=True
+    #     )
+    #     message = message_response["messages"][0]
+    #     message_blocks = message.get("blocks", [])
+    #     message_text = message.get("text", "")
+
+    # except Exception as e:
+    #     logger.error(f"Failed to fetch message content: {e}")
+    #     return
+
+    if action_id == SHOW_EVERYONE_ACTION_ID:
+        # Post as non-ephemeral message in thread
+
+        try:
+            webhook.send(
+                response_type="ephemeral",
+                text="",
+                blocks=[],
+                replace_original=True,
+                delete_original=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send webhook: {e}")
+
+        all_blocks = build_slack_response_blocks(
+            answer=answer,
+            tenant_id=tenant_id,
+            message_info=slack_message_info,
+            channel_conf=None,
+            use_citations=True,
+            offer_ephemeral_publication=False,
+            skip_ai_feedback=False,
+            feedback_reminder_id=feedback_reminder_id,
+            skip_restated_question=True,
+        )
+        try:
+            respond_in_thread_or_channel(
+                client=client.web_client,
+                channel=channel_id,
+                receiver_ids=None,
+                text="Hello! Onyx has some results for you!",
+                blocks=all_blocks,
+                thread_ts=original_question_ts,
+                # don't unfurl, since otherwise we will have 5+ previews which makes the message very long
+                unfurl=False,
+                send_as_ephemeral=False,
+            )
+        except Exception as e:
+            logger.error(f"Failed to publish ephemeral message: {e}")
+            raise e
+
+    elif action_id == KEEP_TO_YOURSELF_ACTION_ID:
+        # Keep as ephemeral message in channel, but remove the publish button and add feedback button
+
+        changed_blocks = build_slack_response_blocks(
+            answer=answer,
+            tenant_id=tenant_id,
+            message_info=slack_message_info,
+            channel_conf=None,
+            use_citations=True,
+            offer_ephemeral_publication=False,
+            skip_ai_feedback=False,
+            feedback_reminder_id=feedback_reminder_id,
+            skip_restated_question=True,
+        )
+
+        try:
+            if slack_message_info.thread_to_respond is not None:
+                webhook.send(
+                    response_type="ephemeral",
+                    text="",
+                    blocks=[],
+                    replace_original=True,
+                    delete_original=True,
+                )
+
+                respond_in_thread_or_channel(
+                    client=client.web_client,
+                    channel=channel_id,
+                    receiver_ids=[user_id],
+                    text="Hello! Onyx has some results for you!",
+                    blocks=changed_blocks,
+                    thread_ts=original_question_ts,
+                    # don't unfurl, since otherwise we will have 5+ previews which makes the message very long
+                    unfurl=False,
+                    send_as_ephemeral=True,
+                )
+            else:
+                webhook.send(
+                    response_type="ephemeral",
+                    text="Your personal response, sent as an ephemeral message",
+                    blocks=changed_blocks,
+                    replace_original=True,
+                    delete_original=False,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send webhook: {e}")
 
 
 def handle_slack_feedback(
@@ -215,7 +350,7 @@ def handle_slack_feedback(
         else:
             msg = f"<@{user_id_to_post_confirmation}> has {feedback_response_txt} the AI Answer"
 
-        respond_in_thread(
+        respond_in_thread_or_channel(
             client=client,
             channel=channel_id_to_post_confirmation,
             text=msg,
@@ -267,7 +402,7 @@ def handle_followup_button(
 
     blocks = build_follow_up_resolved_blocks(tag_ids=tag_ids, group_ids=group_ids)
 
-    respond_in_thread(
+    respond_in_thread_or_channel(
         client=client.web_client,
         channel=channel_id,
         text="Received your request for more help",
@@ -351,7 +486,7 @@ def handle_followup_resolved_button(
 
     resolved_block = SectionBlock(text=msg_text)
 
-    respond_in_thread(
+    respond_in_thread_or_channel(
         client=client.web_client,
         channel=channel_id,
         text="Your request for help as been addressed!",

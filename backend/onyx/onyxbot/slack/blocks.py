@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import cast
 
@@ -31,12 +32,15 @@ from onyx.onyxbot.slack.constants import FEEDBACK_DOC_BUTTON_BLOCK_ACTION_ID
 from onyx.onyxbot.slack.constants import FOLLOWUP_BUTTON_ACTION_ID
 from onyx.onyxbot.slack.constants import FOLLOWUP_BUTTON_RESOLVED_ACTION_ID
 from onyx.onyxbot.slack.constants import IMMEDIATE_RESOLVED_BUTTON_ACTION_ID
+from onyx.onyxbot.slack.constants import KEEP_TO_YOURSELF_ACTION_ID
 from onyx.onyxbot.slack.constants import LIKE_BLOCK_ACTION_ID
+from onyx.onyxbot.slack.constants import SHOW_EVERYONE_ACTION_ID
 from onyx.onyxbot.slack.formatting import format_slack_message
 from onyx.onyxbot.slack.icons import source_to_github_img_link
 from onyx.onyxbot.slack.models import SlackMessageInfo
 from onyx.onyxbot.slack.utils import build_continue_in_web_ui_id
 from onyx.onyxbot.slack.utils import build_feedback_id
+from onyx.onyxbot.slack.utils import build_publish_ephemeral_message_id
 from onyx.onyxbot.slack.utils import remove_slack_text_interactions
 from onyx.onyxbot.slack.utils import translate_vespa_highlight_to_slack
 from onyx.utils.text_processing import decode_escapes
@@ -102,6 +106,75 @@ def _build_qa_feedback_block(
                 value=feedback_reminder_id,
             ),
         ],
+    )
+
+
+def _build_ephemeral_publication_block(
+    channel_id: str,
+    original_question_ts: str | None = None,
+    tenant_id: str | None = None,
+    answer: ChatOnyxBotResponse | None = None,
+    message_info: SlackMessageInfo | None = None,
+    feedback_reminder_id: str | None = None,
+) -> Block:
+    if not answer or not answer.answer:
+        raise ValueError("Answer is required to change the ephemeral message")
+
+    # check whether the message is in a thread
+    if (
+        message_info is not None
+        and message_info.msg_to_respond is not None
+        and message_info.thread_to_respond is not None
+        and (message_info.msg_to_respond == message_info.thread_to_respond)
+    ):
+        respond_ts = None
+    else:
+        respond_ts = original_question_ts
+
+    value_dict = {
+        "original_question_ts": original_question_ts,
+        "feedback_reminder_id": feedback_reminder_id,
+        "tenant_id": tenant_id,
+        "answer": {
+            "answer": answer.answer,
+            "answer_valid": answer.answer_valid if answer else None,
+            "chat_message_id": answer.chat_message_id if answer else None,
+            "citations": answer.citations if answer else None,
+            "docs": answer.docs if answer else None,
+            "llm_selected_doc_indices": answer.llm_selected_doc_indices
+            if answer
+            else None,
+        },
+        "message_info": {
+            "bypass_filters": message_info.bypass_filters if message_info else None,
+            "channel_to_respond": message_info.channel_to_respond
+            if message_info
+            else None,
+            "msg_to_respond": message_info.msg_to_respond if message_info else None,
+            "email": message_info.email if message_info else None,
+            "sender_id": message_info.sender_id if message_info else None,
+            "thread_messages": message_info.thread_messages if message_info else None,
+            "is_bot_msg": message_info.is_bot_msg if message_info else None,
+            "is_bot_dm": message_info.is_bot_dm if message_info else None,
+            "thread_to_respond": respond_ts,
+        },
+    }
+
+    return ActionsBlock(
+        block_id=build_publish_ephemeral_message_id(original_question_ts),
+        elements=[
+            ButtonElement(
+                action_id=SHOW_EVERYONE_ACTION_ID,
+                text="📢 Show Everyone in Channel",
+                value=json.dumps(value_dict),
+            ),
+            ButtonElement(
+                action_id=KEEP_TO_YOURSELF_ACTION_ID,
+                text="🤫  Keep to Yourself",
+                value=json.dumps(value_dict),
+            ),
+        ],
+        others={"my_data": "my_data"},
     )
 
 
@@ -488,16 +561,21 @@ def build_slack_response_blocks(
     use_citations: bool,
     feedback_reminder_id: str | None,
     skip_ai_feedback: bool = False,
+    offer_ephemeral_publication: bool = False,
     expecting_search_result: bool = False,
+    skip_restated_question: bool = False,
 ) -> list[Block]:
     """
     This function is a top level function that builds all the blocks for the Slack response.
     It also handles combining all the blocks together.
     """
     # If called with the OnyxBot slash command, the question is lost so we have to reshow it
-    restate_question_block = get_restate_blocks(
-        message_info.thread_messages[-1].message, message_info.is_bot_msg
-    )
+    if not skip_restated_question:
+        restate_question_block = get_restate_blocks(
+            message_info.thread_messages[-1].message, message_info.is_bot_msg
+        )
+    else:
+        restate_question_block = []
 
     if expecting_search_result:
         answer_blocks = _build_qa_response_blocks(
@@ -528,7 +606,22 @@ def build_slack_response_blocks(
             _build_follow_up_block(message_id=answer.chat_message_id)
         )
 
-    ai_feedback_block = []
+    publish_ephemeral_message_block = []
+
+    if offer_ephemeral_publication:
+        publish_ephemeral_message_block.append(
+            _build_ephemeral_publication_block(
+                channel_id=message_info.channel_to_respond,
+                original_question_ts=message_info.msg_to_respond,
+                tenant_id=tenant_id,
+                answer=answer,
+                message_info=message_info,
+                feedback_reminder_id=feedback_reminder_id,
+            )
+        )
+
+    ai_feedback_block: list[Block] = []
+
     if answer.chat_message_id is not None and not skip_ai_feedback:
         ai_feedback_block.append(
             _build_qa_feedback_block(
@@ -550,6 +643,7 @@ def build_slack_response_blocks(
     all_blocks = (
         restate_question_block
         + answer_blocks
+        + publish_ephemeral_message_block
         + ai_feedback_block
         + citations_divider
         + citations_blocks
