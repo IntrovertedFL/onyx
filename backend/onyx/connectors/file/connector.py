@@ -8,7 +8,6 @@ from typing import IO
 
 from sqlalchemy.orm import Session
 
-from onyx.configs.app_configs import ENABLE_INDEXING_TIME_IMAGE_ANALYSIS
 from onyx.configs.app_configs import INDEX_BATCH_SIZE
 from onyx.configs.constants import DocumentSource
 from onyx.configs.constants import FileOrigin
@@ -27,7 +26,6 @@ from onyx.file_processing.extract_file_text import is_valid_file_ext
 from onyx.file_processing.extract_file_text import load_files_from_zip
 from onyx.file_processing.image_utils import store_image_and_create_section
 from onyx.file_store.file_store import get_default_file_store
-from onyx.llm.factory import get_default_llm_with_vision
 from onyx.llm.interfaces import LLM
 from onyx.utils.logger import setup_logger
 from shared_configs.configs import POSTGRES_DEFAULT_SCHEMA
@@ -257,14 +255,6 @@ class LocalFileConnector(LoadConnector, VisionEnabledConnector):
         self.batch_size = batch_size
         self.tenant_id = tenant_id
         self.pdf_pass: str | None = None
-        self.image_analysis_llm: LLM | None = None
-
-        if ENABLE_INDEXING_TIME_IMAGE_ANALYSIS:
-            self.image_analysis_llm = get_default_llm_with_vision()
-            if self.image_analysis_llm is None:
-                logger.warning(
-                    "No LLM with vision found, image summarization will be disabled"
-                )
 
         # Initialize vision LLM using the mixin
         self.initialize_vision_llm()
