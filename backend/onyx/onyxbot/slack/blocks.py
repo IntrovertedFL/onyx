@@ -135,6 +135,7 @@ def _build_ephemeral_publication_block(
         respond_ts = original_question_ts
         channel_thread_str = "Thread"
 
+    # This is a dict as a key component, channel_conf, as a TypeDict itself
     value_dict: dict[str, Any] = {
         "original_question_ts": original_question_ts,
         "feedback_reminder_id": feedback_reminder_id,
