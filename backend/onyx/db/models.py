@@ -207,6 +207,10 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
         primaryjoin="User.id == foreign(ConnectorCredentialPair.creator_id)",
     )
 
+    @validates("email")
+    def validate_email(self, key: str, value: str) -> str:
+        return value.lower() if value else value
+
     @property
     def password_configured(self) -> bool:
         """
