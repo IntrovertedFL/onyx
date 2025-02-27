@@ -299,7 +299,9 @@ def handle_publish_ephemeral_message_button(
             respond_in_thread_or_channel(
                 client=client.web_client,
                 channel=channel_id,
-                receiver_ids=None,
+                receiver_ids=channel_conf.get(
+                    "respond_member_group_list"
+                ),  # If respond_member_group_list is set, send to them. TODO: check!
                 text="Hello! Onyx has some results for you!",
                 blocks=all_blocks,
                 thread_ts=original_question_ts,

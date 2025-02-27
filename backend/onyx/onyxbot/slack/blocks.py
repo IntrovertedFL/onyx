@@ -161,7 +161,7 @@ def _build_ephemeral_publication_block(
             msg_to_respond=message_info.msg_to_respond,
             email=message_info.email,
             sender_id=message_info.sender_id,
-            thread_messages=None,
+            thread_messages=[],
             is_bot_msg=message_info.is_bot_msg,
             is_bot_dm=message_info.is_bot_dm,
             thread_to_respond=respond_ts,
