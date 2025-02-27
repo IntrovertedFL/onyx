@@ -343,6 +343,9 @@ def list_bot_configs(
     ]
 
 
+MAX_SLACK_PAGES = 5
+
+
 @router.get(
     "/admin/slack-app/bots/{bot_id}/channels",
 )
@@ -364,15 +367,14 @@ def get_all_channels_from_slack_api(
     client = WebClient(token=tokens["bot_token"])
     all_channels = []
     next_cursor = None
-    max_pages = 5  # Limit to 5 pages of results (typically 500 channels)
     current_page = 0
 
     try:
         # Use users_conversations with limited pagination
-        while current_page < max_pages:
+        while current_page < MAX_SLACK_PAGES:
             current_page += 1
 
-            # Make API call with cursor if we have one
+            # Make API call with    cursor if we have one
             if next_cursor:
                 response = client.users_conversations(
                     types="public_channel,private_channel",
@@ -397,6 +399,11 @@ def get_all_channels_from_slack_api(
             ):
                 next_cursor = response["response_metadata"]["next_cursor"]
                 if next_cursor:
+                    if current_page == MAX_SLACK_PAGES:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Workspace has too many channels to paginate over in this call.",
+                        )
                     continue
 
             # If we get here, no more pages
