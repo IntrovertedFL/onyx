@@ -1,7 +1,7 @@
 """force lowercase all users
 
 Revision ID: f11b408e39d3
-Revises: 8f43500ee275
+Revises: 3bd4c84fe72f
 Create Date: 2025-02-26 17:04:55.683500
 
 """
@@ -9,7 +9,7 @@ Create Date: 2025-02-26 17:04:55.683500
 
 # revision identifiers, used by Alembic.
 revision = "f11b408e39d3"
-down_revision = "8f43500ee275"
+down_revision = "3bd4c84fe72f"
 branch_labels = None
 depends_on = None
 
