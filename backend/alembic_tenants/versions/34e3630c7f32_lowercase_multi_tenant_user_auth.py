@@ -19,7 +19,7 @@ def upgrade() -> None:
     # 1) Convert all existing rows to lowercase
     op.execute(
         """
-        UPDATE public.user_tenant_mapping
+        UPDATE user_tenant_mapping
         SET email = LOWER(email)
         """
     )
