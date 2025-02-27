@@ -222,9 +222,7 @@ def handle_publish_ephemeral_message_button(
 
     user_email = value_dict.get("message_info", {}).get("email")
 
-    chat_message_id = json.loads(req.payload["actions"][0]["value"]).get(
-        "chat_message_id"
-    )
+    chat_message_id = value_dict.get("chat_message_id")
 
     # Obtain onyx_user and chat_message information
     if not chat_message_id:
